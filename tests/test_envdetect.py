@@ -137,3 +137,14 @@ def test_apply_plan_writes_dockerfile_and_env(tmp_path):
     assert "COPY repo.bundle" in t.env.dockerfile and t.env.log_parser == "pytest"
     assert t.metadata["env_plan"]["runtime_version"] == "3.10"
     assert "git clone -q https://github.com/o/r.git" in dockerfile_for(plan, Task("i", "o/r", "b"), local_bundle=False)
+
+
+def test_local_backend_refuses_tasks_with_services():
+    from swe_env_kit.sandbox import SandboxError
+    from swe_env_kit.workspace import open_sandbox
+
+    t = Task(instance_id="i", repo="o/r", base_commit="b", env={"services": [{"name": "db", "image": "postgres:16"}]}) \
+        if False else Task.from_dict({"instance_id": "i", "repo": "o/r", "base_commit": "b",
+                                       "env": {"services": [{"name": "db", "image": "postgres:16", "ports": [5432]}]}})
+    with pytest.raises(SandboxError, match="needs services"):
+        open_sandbox(t, "local")

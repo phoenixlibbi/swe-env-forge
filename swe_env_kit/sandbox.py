@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -99,12 +100,28 @@ def docker_build(dockerfile: str, tag: str, platform: str | None = None, context
     return log
 
 
+# Settings some service images refuse to start without.
+SERVICE_DEFAULT_ENV = {
+    "postgres": {"POSTGRES_PASSWORD": "postgres", "POSTGRES_HOST_AUTH_METHOD": "trust"},
+    "postgis": {"POSTGRES_PASSWORD": "postgres", "POSTGRES_HOST_AUTH_METHOD": "trust"},
+    "mysql": {"MYSQL_ALLOW_EMPTY_PASSWORD": "yes"},
+    "mariadb": {"MARIADB_ALLOW_EMPTY_ROOT_PASSWORD": "yes"},
+    "elasticsearch": {"discovery.type": "single-node", "xpack.security.enabled": "false"},
+}
+
+
 class DockerSandbox(Sandbox):
-    """A long-lived container; every command runs through ``docker exec``."""
+    """A long-lived container; every command runs through ``docker exec``.
+
+    ``services`` (Postgres, Redis, ...) run as extra containers that share this container's
+    network namespace, so tests reach them on ``localhost`` like GitHub Actions services, and
+    they keep working when the sandbox has no network.
+    """
 
     def __init__(self, image: str, workdir: str = "/testbed", *, platform: str | None = None,
                  network: bool = True, env_vars: dict[str, str] | None = None, memory: str | None = None,
-                 cpus: str | None = None, keep: bool = False, pull: bool = True):
+                 cpus: str | None = None, keep: bool = False, pull: bool = True,
+                 services: list[dict] | None = None, service_timeout: float = 180):
         self.image, self.workdir, self.keep = image, workdir, keep
         self.scratch = "/tmp/swekit"
         self.env_vars = dict(env_vars or {})
@@ -128,6 +145,39 @@ class DockerSandbox(Sandbox):
             raise
         self.shell = "bash" if "bash" in probe.output else "sh"
         self.has_timeout = "timeout" in probe.output.replace("bash", "")
+        self.service_names: list[str] = []
+        try:
+            for svc in services or []:
+                self._start_service(svc, platform)
+            for svc in services or []:
+                for port in svc.get("ports") or []:
+                    self._wait_port(int(port), service_timeout, svc.get("name", "service"))
+        except BaseException:
+            self.close()
+            raise
+
+    def _start_service(self, svc: dict, platform: str | None) -> None:
+        image = str(svc["image"])
+        docker_pull(image)
+        name = f"{self.name}-{re.sub(r'[^a-z0-9-]', '-', str(svc.get('name', 'svc')).lower())}"
+        env = dict(next((v for k, v in SERVICE_DEFAULT_ENV.items() if k in image.split("/")[-1]), {}))
+        env.update({str(k): str(v) for k, v in (svc.get("env") or {}).items()})
+        cmd = ["docker", "run", "-d", "--name", name, "--network", f"container:{self.name}",
+               *[a for k, v in env.items() for a in ("-e", f"{k}={v}")], image,
+               *(shlex.split(svc["command"]) if svc.get("command") else [])]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if res.returncode != 0:
+            raise SandboxError(f"service {svc.get('name')} ({image}) failed to start: {res.stderr.strip()[-400:]}")
+        self.service_names.append(name)
+
+    def _wait_port(self, port: int, timeout: float, label: str) -> None:
+        probe = (f"for i in $(seq 1 {int(timeout)}); do (echo > /dev/tcp/127.0.0.1/{port}) >/dev/null 2>&1 && exit 0; "
+                 "sleep 1; done; exit 1") if self.shell == "bash" else (
+                 f"python3 -c \"import socket,time\nfor i in range({int(timeout)}):\n  try: socket.create_connection(('127.0.0.1',{port}),1); break\n"
+                 f"  except OSError: time.sleep(1)\nelse: raise SystemExit(1)\"")
+        res = self._raw([self.shell, "-c", probe], timeout + 30)
+        if res.exit_code != 0:
+            raise SandboxError(f"service {label} did not open port {port} within {timeout:.0f}s")
 
     def _raw(self, argv: list[str], timeout: float | None, workdir: str | None = None,
              env: dict[str, str] | None = None, stdin: bytes | None = None) -> ExecResult:
@@ -173,7 +223,8 @@ class DockerSandbox(Sandbox):
     def close(self) -> None:
         if getattr(self, "_closed", True) or self.keep:
             return
-        subprocess.run(["docker", "rm", "-f", self.name], capture_output=True, timeout=120)
+        names = [*getattr(self, "service_names", []), self.name]
+        subprocess.run(["docker", "rm", "-f", *names], capture_output=True, timeout=180)
         self._closed = True
 
 
