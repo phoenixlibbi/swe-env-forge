@@ -78,9 +78,12 @@ def check_proposal(task: Task, proposal: dict[str, Any]) -> str:
 
 def setup_environment(task: Task, client=None, *, max_attempts: int = 4, runs: int = 1, backend: str = "docker",
                       build: Callable[[Task], str] | None = None,
-                      check: Callable[[Task], Any] | None = None) -> tuple[Task, list[SetupAttempt]]:
+                      check: Callable[[Task], Any] | None = None,
+                      max_asks: int = 3) -> tuple[Task, list[SetupAttempt]]:
     """Make ``task`` validate, repairing its environment with ``client`` when needed.
 
+    Each attempt builds and validates once. When it fails, the model is asked for a repair; an
+    unusable reply is sent back with the reason (up to ``max_asks`` times) without rebuilding.
     ``build`` and ``check`` default to building the Docker image and running validation; tests
     inject fakes. Returns the task (with the last environment tried) and the attempt history.
     """
@@ -92,6 +95,7 @@ def setup_environment(task: Task, client=None, *, max_attempts: int = 4, runs: i
     check = check or (lambda t: validate(t, backend, runs=runs))
     if not task.env.image and not task.env.dockerfile:
         apply_plan(task, detect_for_task(task))
+    context = _repo_context(task)
     attempts: list[SetupAttempt] = []
     for n in range(1, max_attempts + 1):
         att = SetupAttempt(n, "", dockerfile=task.env.dockerfile or "", test_command=task.env.test_command or "",
@@ -113,32 +117,88 @@ def setup_environment(task: Task, client=None, *, max_attempts: int = 4, runs: i
         attempts.append(att)
         if client is None or n == max_attempts:
             break
-        proposal = _ask(task, att, client)
-        why = check_proposal(task, proposal) if proposal else "no JSON in the reply"
-        if why:
-            attempts.append(SetupAttempt(n, "rejected_proposal", [why], explanation=str((proposal or {}).get("explanation", ""))))
-            continue  # try again from the same environment with a fresh request
+        messages = _first_request(task, att, context)
+        proposal = None
+        for _ask_no in range(max_asks):
+            text, _usage = client.chat(messages)
+            proposal = parse_proposal(text, task)
+            why = check_proposal(task, proposal) if proposal else "no Dockerfile in the reply"
+            if not why:
+                break
+            attempts.append(SetupAttempt(n, "rejected_proposal", [why], explanation=text.strip()[:300]))
+            messages += [{"role": "assistant", "content": text},
+                         {"role": "user", "content": f"That reply cannot be used: {why}. Reply again with ONLY the JSON "
+                                                     "object, or a ```dockerfile block followed by a line "
+                                                     "'TEST_COMMAND: <command>'."}]
+            proposal = None
+        if proposal is None:
+            continue  # rebuild the same environment once more; the log may differ (flaky installs)
         task.env.dockerfile = str(proposal["dockerfile"])
         task.env.test_command = str(proposal["test_command"])
         if proposal.get("log_parser"):
             task.env.log_parser = str(proposal["log_parser"])
-        attempts[-1].explanation = str(proposal.get("explanation", ""))
+        att.explanation = str(proposal.get("explanation", ""))
     task.metadata["env_setup"] = {"attempts": [asdict(a) | {"dockerfile": "", "log_tail": ""} for a in attempts],
                                   "valid": bool(attempts and attempts[-1].outcome == "valid")}
     return task, attempts
 
 
-def _ask(task: Task, att: SetupAttempt, client) -> dict[str, Any] | None:
+_DEP_FILES = ("requirements.txt", "requirements-dev.txt", "requirements-test.txt", "requirements_test.txt",
+              "test-requirements.txt", "tox.ini", "setup.cfg", "pyproject.toml", "package.json", "go.mod",
+              "Cargo.toml", "Gemfile", "composer.json", ".python-version", ".nvmrc")
+
+
+def _repo_context(task: Task, max_chars: int = 5000) -> str:
+    """Dependency files at the base commit (names and heads), so the model can see what tests need."""
+    try:
+        from .envdetect import RepoView
+        from .workspace import repo_cache
+
+        view = RepoView(repo_cache(task.clone_url, task.base_commit), task.base_commit)
+    except Exception:
+        return ""
+    files = [f for f in _DEP_FILES if view.exists(f)] + view.glob("requirements/*.txt")
+    out, used = [], 0
+    for f in files:
+        text = "\n".join((view.read(f) or "").splitlines()[:40])
+        chunk = f"--- {f} ---\n{text}\n"
+        if used + len(chunk) > max_chars:
+            out.append(f"--- {f} --- (not shown)")
+            continue
+        out.append(chunk)
+        used += len(chunk)
+    return "\n".join(out)
+
+
+def _first_request(task: Task, att: SetupAttempt, context: str) -> list[dict[str, str]]:
     system = SETUP_PROMPT.format(base=task.base_commit, parser=task.env.log_parser,
                                  parsers=", ".join(sorted(PARSERS)))
     evidence = "\n".join((task.metadata.get("env_plan") or {}).get("evidence", [])[:12])
     log_tail = re.sub(r"[ \t]+", " ", att.log_tail)[-6000:]
     msg = (f"Repository: {task.repo} ({task.language})\nWhat we learned from the repo:\n{evidence or '(nothing)'}\n\n"
+           f"Dependency files in the repository at this commit:\n{context or '(none found)'}\n\n"
            f"Current Dockerfile:\n{task.env.dockerfile}\n\nCurrent test command: {task.env.test_command}\n"
            f"Log parser: {task.env.log_parser}\n\nOutcome: {att.outcome} {att.reasons}\n"
            f"Log tail:\n{log_tail}")
-    text, _usage = client.chat([{"role": "system", "content": system}, {"role": "user", "content": msg}])
-    return _extract_json(text)
+    return [{"role": "system", "content": system}, {"role": "user", "content": msg}]
+
+
+_DOCKER_BLOCK = re.compile(r"```(?:dockerfile|docker|Dockerfile)?\s*\n(FROM.*?)```", re.S | re.I)
+_TEST_LINE = re.compile(r"^\W*TEST[_ ]COMMAND\W*:?\s*`?(.+?)`?\s*$", re.M | re.I)
+
+
+def parse_proposal(text: str, task: Task) -> dict[str, Any] | None:
+    """A proposal from JSON, or from a ```dockerfile block plus a TEST_COMMAND line (smaller models)."""
+    obj = _extract_json(text)
+    if obj and obj.get("dockerfile"):
+        obj.setdefault("test_command", task.env.test_command or "")
+        return obj
+    m = _DOCKER_BLOCK.search(text)
+    if not m:
+        return None
+    t = _TEST_LINE.search(text)
+    return {"dockerfile": m.group(1).strip() + "\n", "test_command": t.group(1).strip() if t else (task.env.test_command or ""),
+            "explanation": "markdown reply"}
 
 
 def summary(attempts: list[SetupAttempt]) -> str:

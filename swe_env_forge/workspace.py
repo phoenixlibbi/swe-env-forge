@@ -74,7 +74,8 @@ def repo_cache(url: str, commit: str | None = None) -> Path:
         if not path.exists():
             tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
             shutil.rmtree(tmp, ignore_errors=True)
-            res = subprocess.run(["git", "clone", "-q", "--mirror", url, str(tmp)], capture_output=True, text=True)
+            res = subprocess.run(["git", "clone", "-q", "--mirror", url, str(tmp)], capture_output=True, text=True,
+                                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=3600)
             if res.returncode != 0:
                 shutil.rmtree(tmp, ignore_errors=True)
                 raise WorkspaceError(f"git clone {url} failed: {res.stderr.strip()[-500:]}")

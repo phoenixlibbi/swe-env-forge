@@ -62,7 +62,8 @@ def test_agent_handles_build_failures_and_bad_proposals():
 
     t, attempts = setup_environment(task(), Client([bad, good]), build=build, check=checker("valid"), max_attempts=4)
     outcomes = [a.outcome for a in attempts]
-    assert outcomes == ["build_failed", "rejected_proposal", "build_failed", "valid"]
+    # the bad reply is sent back with the reason; the corrected one is used without an extra rebuild
+    assert outcomes == ["build_failed", "rejected_proposal", "valid"]
     assert attempts[1].reasons == ["dockerfile must still check out the base commit"]
 
 
@@ -77,3 +78,18 @@ def test_check_proposal_rules():
     assert "FROM" in check_proposal(t, {"dockerfile": "RUN x", "test_command": "pytest"})
     assert "parser" in check_proposal(t, {"dockerfile": DF, "test_command": "x {test_files}", "log_parser": "nope"})
     assert "placeholder" in check_proposal(t, {"dockerfile": DF, "test_command": "pytest"})
+
+
+def test_markdown_replies_from_smaller_models_are_accepted():
+    from swe_env_forge.envagent import parse_proposal
+
+    reply = ("Sure! The tests need freezegun.\n```dockerfile\n" + DF + "RUN pip install freezegun\n```\n"
+             "TEST_COMMAND: `python -m pytest -rA {test_files}`\n")
+    p = parse_proposal(reply, task())
+    assert p["dockerfile"].startswith("FROM python:3.11") and "freezegun" in p["dockerfile"]
+    assert p["test_command"] == "python -m pytest -rA {test_files}"
+    assert parse_proposal("no code here", task()) is None
+    fixed = DF + "RUN pip install freezegun\n"
+    t, attempts = setup_environment(task(), Client(["I think you should install it.", "```dockerfile\n" + fixed + "```"]),
+                                    build=lambda t: "ok", check=checker("invalid", "valid"))
+    assert [a.outcome for a in attempts] == ["invalid", "rejected_proposal", "valid"]
