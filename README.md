@@ -28,12 +28,12 @@
 | Command | What it does | Docker / LLM needed |
 |---|---|---|
 | `swekit fetch` / `convert` | Download SWE-bench, Lite, Verified or Pro from HuggingFace; convert between swe-env-kit, SWE-bench, Pro and generic rows | no / no |
-| `swekit mine` | Turn git history into candidate tasks: merged PRs that close an issue (SWE-bench), or consecutive commit pairs (Pro, works on private repos) | no / no |
+| `swekit mine` | Turn git history into candidate tasks: merged PRs that close an issue (SWE-bench), consecutive commit pairs (Pro, works on private repos), or commit windows for repos that push code and tests separately | no / no |
 | `swekit stats` | Fix size, "trivial 1–2 line" tasks, Pro eligibility, static naming leaks, license class | no / no |
 | `swekit spec` | Write the Pro-style problem statement, requirements and interface: deterministic drafts, an LLM writer, or your own agent; leak check | no / optional |
 | `swekit spec-export` / `spec-import` | Human review: one editable Markdown file per task; records who wrote and reviewed every field | no / no |
-| `swekit env` | Write or build a Docker environment per task (dataset image, its Dockerfile, or a generated one for 10 languages) | yes / no |
-| `swekit validate` | Run the tests before and after the reference fix N times: FAIL_TO_PASS, PASS_TO_PASS, flaky tests, tests the fix breaks, naming leaks | yes (or `--backend local`) / no |
+| `swekit env` | Build each task's environment. `--detect` reads the repo's CI workflows, version files and manifests (and its backing services). `--setup` adds an agent that builds, validates and repairs the environment until the task validates | yes / optional |
+| `swekit validate` | Run the tests before and after the reference fix N times, plus once at the base without the new tests: FAIL_TO_PASS, PASS_TO_PASS, flaky tests, tests the fix breaks, naming leaks, F2P tests that only failed to import, missing dependencies | yes (or `--backend local`) / no |
 | `swekit run` | Run an agent in a gym with SWE-agent style tools (bash, `str_replace_editor`, search, find_file), turn / cost / time budgets and checkpoint grading. Agents: nop, oracle, replay, a tool-calling LLM agent, or your class | yes / optional |
 | `swekit grade` | Grade patches (SWE-bench predictions format) with a tamper guard; binary + dense reward; CI gate with `--expect` | yes / no |
 | `swekit import-traj` | Import SWE-agent `.traj` files so existing runs can be graded, reported and failure-classified | optional / no |
@@ -74,9 +74,9 @@ Frontier labs train coding models with RL on SWE-style tasks and report SWE-benc
 
 **"Turn our private repo into an RL environment."**
 ```bash
-swekit mine ~/code/our-service -o mined.jsonl --pro          # commit pairs, >= 10 changed lines, <= 100 tasks
-swekit env mined.jsonl --build                                # per-language Docker images (edit env.dockerfile if needed)
-swekit validate mined.jsonl -o valid.jsonl --runs 3           # F2P / P2P, flaky tests out, naming leaks flagged
+swekit mine ~/code/our-service -o mined.jsonl --pro --window 3   # commit pairs or windows, >= 10 changed lines
+swekit env mined.jsonl --setup --model gpt-4.1 --write envs.jsonl  # detect from CI, build, validate, repair
+swekit validate envs.jsonl -o valid.jsonl --runs 3                 # F2P / P2P, flaky tests out, naming leaks flagged
 swekit spec valid.jsonl -o specced.jsonl --mode llm --model gpt-4.1   # or: --mode draft, then human review
 swekit spec-export specced.jsonl review/ && swekit spec-import specced.jsonl review/ -o final.jsonl --require-reviewed
 ```
@@ -166,7 +166,10 @@ Exit codes:
 | **Contamination** | The model saw the task's answer during pre-training, so the score measures memory | `stats.license_class` |
 | **Copyleft (GPL)** | A license requiring derived works to stay open. Labs tend to avoid training on it, which gives contamination *resistance*, not a guarantee. | `stats.license_class` |
 | **Saturation** | Top models crowd near the ceiling, so the benchmark can't separate them | budget curves in `report` |
-| **Commit pair** | (parent, commit) in git history: the base is the parent, and the diff splits into test and gold patches | `mine.mine_commits` |
+| **Commit pair / window** | (parent, commit) in git history: the base is the parent, and the diff splits into test and gold patches. A window merges consecutive commits when code and tests were pushed separately | `mine.mine_commits` |
+| **Masked F2P** | A test that "fails" before the fix only because the new test file imports a name the fix creates. A run at the base without the new tests exposes it, and it moves to P2P, so partial credit isn't paid for defining a name | `validate.validate_in` |
+| **Start ref** | Official SWE-bench images carry an environment commit on top of the base (for example `pytest -rA` in sphinx's tox.ini). Sandboxes start from it, after checking it is at most 5 commits past the base | `workspace.checkout_base` |
+| **Environment plan** | The image, install steps, test command and services, derived from the repo's own CI and manifests, with evidence | `envdetect.detect` |
 | **BM25 vs oracle** | Keyword retrieval of files vs handing the model exactly the files the fix edits. The gap measures how much search costs. | `localize` |
 | **Dense reward** | Partial credit, F2P pass rate × P2P pass rate. It gives a learning signal where binary gives 0, and the P2P factor punishes regressions. | `grade.score` |
 | **Tamper guard** | The grader reverts test files, test helpers and runner config the agent touched, and fails skip markers and test-setting edits | `grade.tamper_flags` |
@@ -220,19 +223,31 @@ How to read the comparison: Lite tasks edit a single file, so "all", "any" and "
 
 ### 4. Verified against the official harnesses (live Docker runs)
 
-All runs use the benchmarks' **own** images:
+Every check below used the benchmarks' **own** images and data. The full log, with the bugs these checks uncovered and how they were fixed, is in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
-| Task | Benchmark | Our F2P / P2P | Matches the dataset? | Gold patch | Empty patch |
-|---|---|---|---|---|---|
-| `pytest-dev__pytest-5227` | SWE-bench Lite | 3 / 34 | identical | resolved | not resolved |
-| `django__django-11099` | SWE-bench Lite | 2 / 20 | P2P ⊇ dataset; one dataset F2P test passes *before* the fix in the official image | resolved | not resolved |
-| `psf__requests-2317` | SWE-bench Lite | 1 / 141 | 7 dataset F2P tests call httpbin.org over the live network and pass before the fix today, so they aren't reproducible | n/a | n/a |
-| `openlibrary-00bec1e7` | SWE-bench Pro | 5 / 15 | identical | resolved | not resolved |
-| `navidrome-0130c6dc` (Go) | SWE-bench Pro | 1 / 0 | identical | resolved | not resolved |
+- **Grading parity on every SWE-bench repository type.** One task from each of the 12 Lite repositories, covering astropy, django, matplotlib, seaborn, flask, requests, xarray, pylint, pytest, scikit-learn, sphinx and sympy. This exercises all seven SWE-bench log parsers, plus `tox` and sympy's `bin/test`. The reference patch resolves and the empty patch does not, on all of them. The one exception is `requests`, whose upstream test list depends on a live website.
+- **Test lists re-derived by `validate`:**
 
-- **Pro scripts:** the Pro tasks ran Pro's own per-instance `run_script.sh`, with its `parser.py` executed outside the sandbox.
-- **Oracle agent:** driven through the gym, it resolved both SWE-bench tasks, with checkpoint grades on every turn.
-- **History probe:** an agent in the same sandboxes saw **0 commits after the base** (`git rev-list --all --not HEAD`) out of django's 26,747. The official images already ship history only up to the base. Repos cloned for mined tasks and many third-party datasets don't, which is why the purge and its check always run.
+  | Task | Ours vs the dataset |
+  |---|---|
+  | pytest-5227 | identical |
+  | SWE-bench Pro openlibrary (Python) | identical, run with Pro's own per-instance scripts |
+  | SWE-bench Pro navidrome (Go) | identical |
+  | django-11099 | one dataset F2P test passes *before* the fix in the official image |
+
+- **Official harness.** The predictions file written by `swekit run` scored **2/2 resolved** in the official `swebench` package (v5.0.2).
+- **Real repository, end to end.** `pallets/itsdangerous` went through mine, build, validate, spec, grade. It produced 2 valid tasks. 3 candidates were correctly rejected: two were not behaviour changes, and one had a missing test dependency.
+- **The answer stays hidden.** Agents in these sandboxes see no commit after the base (none of django's 26,747), have no network, and find nothing hidden in their scratch space.
+
+**The official SWE-bench harness accepts a fake fix that swe-env-kit rejects.**
+
+| Patch for `pytest-dev__pytest-5227` (none of them fixes the bug) | Official harness | swe-env-kit |
+|---|---|---|
+| Adds `conftest.py` files whose pytest hook marks every test passed | **resolved** | not resolved: reverted and flagged |
+| Overwrites the hidden test file | unresolved | not resolved |
+| Adds a `-p` plugin to `tox.ini`'s pytest `addopts` | unresolved | `tampering` |
+
+The official harness restores the hidden test files but not test-runner configuration. For RL that's a live reward hack: a policy can learn to write a conftest instead of a fix.
 
 ### 5. Hardened against an adversarial review
 
@@ -299,6 +314,32 @@ swekit mine owner/name --mode prs -o prs.jsonl --max-prs 300     # SWE-bench rul
 swekit mine ./repo -o commits.jsonl --pro --since 2024-01-01     # Pro rules, offline, private repos fine
 swekit convert other.jsonl -o tasks.jsonl                        # generic rows, including SWE-bench style `specs` dicts
 swekit convert tasks.jsonl --to swebench -o sb.jsonl             # export for the official SWE-bench harness
+```
+
+### Build environments for any repository
+
+Benchmarks ship prebuilt images. For your own repositories, `env` builds them in three layers:
+
+```bash
+swekit env tasks.jsonl --detect --write detected.jsonl   # 1. read the repo's own CI workflows, version files, manifests
+swekit env detected.jsonl --build                         #    and build (Postgres, Redis, ... start as sidecars)
+swekit env tasks.jsonl --setup --model gpt-4.1 --write ready.jsonl   # 2+3. detect, build, validate, LLM repair loop
+```
+
+1. **Detection** (`envdetect`) reads, at the task's base commit:
+   - the CI test job: runtime versions from `setup-python` / `setup-node` / `setup-go` / `setup-java`, with `${{ matrix.* }}` resolved, plus its services and static env vars;
+   - version files: `.python-version`, `.nvmrc`, `go.mod`, `rust-toolchain`;
+   - dependencies: `requirements/*test*.txt`, tox `deps`, pyproject extras and dependency groups, the lockfile (which picks npm, yarn or pnpm), and the test runner in `package.json` (jest, vitest, mocha);
+   - infrastructure services in `docker-compose`.
+
+   Every decision is recorded as evidence, for example "python 3.12 from .github/workflows/tests.yaml job tests".
+2. **Services** run as extra containers that share the task container's network namespace. Tests reach them on `localhost` just as in GitHub Actions, and they keep working when the agent has no network.
+3. **The setup agent** (`envagent`) builds the image and validates the task. While it fails, it shows a model the Dockerfile, the test command and the failing log, and applies the repair the model proposes. **The reward is validation itself:** the reference fix must pass, the empty patch must fail, and F2P must be non-empty. The model never sees the fix, and each proposal must still check out the base commit and use a known parser.
+
+Repos that push code and tests in separate commits, with no PRs, are handled by commit windows:
+
+```bash
+swekit mine ./app -o tasks.jsonl --window 3 --group-by author-day   # code on Monday + tests on Tuesday = one task
 ```
 
 ### Validate
@@ -413,7 +454,7 @@ Every grade also carries `flags`, `failure` and `reverted_test_files`, so reward
 | Pro §3.1: ≥ 10 lines, multi-file, 50–100 tasks per repo | `mine.MineConfig.pro`, `stats` |
 | Pro §3.2 / App. B: problem statement, requirements, interface | `spec` (draft, LLM, custom, human review) |
 | Pro §4.1: consecutive commit pairs, test / gold split | `mine.mine_commits`, `patches.split_patch` |
-| Pro §4.3: environments, repeated gold runs, flaky tests, human test review | `env`, `validate` (runs × N) |
+| Pro §4.3: environments built by engineers, repeated gold runs, flaky tests, human test review | `envdetect` + `envagent` (automated environment building), `validate` (runs × N, base run) |
 | Pro §5: SWE-agent scaffold, 50 turns, cost caps | `tools` (SWE-agent's editor + search), `agents.LLMAgent`, `gym.SWEEnv`, `Budget`, `report.budget_curves` |
 | Pro §6.2: augmentation ablation | `stats` naming-leak measurement (Results §2) |
 | Pro §6.3: LLM-as-a-judge failure buckets | `failure.classify` (deterministic), `failure.llm_judge` |
@@ -447,7 +488,7 @@ Every grade also carries `flags`, `failure` and `reverted_test_files`, so reward
 ## Limitations
 
 - **Grading trusts the test process.** Like SWE-bench, code under test that monkeypatches the test framework itself from a source module (for example `_pytest.reports`) is not detected.
-- **Generated Dockerfiles are best-effort.** Real repositories often need a hand-written `env.dockerfile`. The dataset presets don't have this problem.
+- **Environment building covers most repositories, not all.** CI detection plus the setup agent handle common Python, Node, Go, Rust and Java setups and their services. UI tests that need browsers, paid APIs, private registries and hardware-specific code still need a human. Those tasks are reported as `environment_incomplete`, never silently dropped.
 - **Static checks are heuristics.** The naming-leak, interface and definition checks are per-language regexes. Treat their output as drafts and warnings.
 - **Rust in-file tests can't be split out.** Unit tests inside Rust source files (`#[cfg(test)]`) stay in the gold patch when a commit is split.
 - **The LLM agent is a minimal reference agent.** Use your own agent for leaderboard numbers.
@@ -458,7 +499,7 @@ Every grade also carries `flags`, `failure` and `reverted_test_files`, so reward
 ```bash
 git clone https://github.com/phoenixlibbi/swe-env-kit && cd swe-env-kit
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q                  # ~230 tests, no Docker or network needed (~2 min)
+.venv/bin/pytest -q                  # ~250 tests, no Docker or network needed (~2 min)
 .venv/bin/pytest -q -m network      # live HuggingFace / GitHub checks
 ```
 
@@ -471,9 +512,10 @@ swe_env_kit/
   formats.py     SWE-bench / Pro / generic converters     grade.py      tamper guard, binary + dense reward
   presets.py     official images, eval scripts, parsers   validate.py   pre/post runs, flaky, naming leaks
   hub.py         HuggingFace, Pro scripts, GitHub API     report.py     slices, budget curves
-  sandbox.py     Docker and local sandboxes               failure.py    Pro failure buckets (+ LLM judge)
-  tools.py       SWE-agent style editor, search, schemas
+  sandbox.py     Docker and local sandboxes, services     failure.py    Pro failure buckets (+ LLM judge)
   workspace.py   checkout, history purge, patch, tests    localize.py   BM25 vs oracle retrieval
+  envdetect.py   environment plans from CI and manifests  envagent.py   build / validate / repair loop
+  yamlite.py     stdlib YAML reader for CI files          tools.py      SWE-agent style editor and search
   dockerfiles.py default per-language images              trajectory.py episodes, SWE-agent import
   llm.py         OpenAI-compatible client                 demo.py       the original demo repository
 ```

@@ -67,7 +67,10 @@ It reads and writes SWE-bench and SWE-bench Pro data, so it works with datasets 
     "log_parser": "pytest | django | sympy | go | jest | mocha | cargo | junit | tap | json | auto",
     "run_script": null, "parser_script": null,          // SWE-bench Pro style per-task scripts
     "env_vars": {},
-    "timeout": 1800
+    "timeout": 1800,
+    "hidden_paths": [],                // deleted before an agent starts (e.g. a baked-in test patch)
+    "start_ref": "base | image-head",  // image-head: keep an image's environment commit on top of the base
+    "services": [{"name": "db", "image": "postgres:16", "env": {}, "ports": [5432]}]
   },
   "metadata": {}
 }
@@ -88,7 +91,7 @@ It reads and writes SWE-bench and SWE-bench Pro data, so it works with datasets 
 | `workspace` | Reset the repo to `base_commit`, strip future history, apply patches (three fallbacks), collect the agent diff, run the tests |
 | `validate` | Run `log_pre` (tests only) and `log_post` (tests + gold) N times each. Derive F2P, P2P, flaky and broken tests. Find naming leaks. Give a verdict. |
 | `grade` | Grade a candidate patch: tamper guard, apply the hidden tests, run, compute binary and dense reward |
-| `mine` | Mine candidate tasks from a repo's history: `commits` (Pro: consecutive commit pairs, works on private repos) or `pr` (SWE-bench: merged PRs that link an issue). Pro filters. |
+| `mine` | Mine candidate tasks from a repo's history: `commits` (Pro: consecutive commit pairs, works on private repos; `window` merges code and tests pushed in separate commits) or `pr` (SWE-bench: merged PRs that link an issue). Pro filters. |
 | `spec` | Draft the Pro-style `interface` (new symbols that tests call) and a requirements skeleton. Check that text doesn't leak the gold patch. Optional LLM polish. |
 | `gym` | `SWEEnv` with `reset()` / `step(action)`. Budgets (turns, cost, wall time), per-turn checkpoints, trajectory logging, batch runner. |
 | `agents` | `nop`, `oracle`, `replay` (our trajectories or SWE-agent `.traj`) and `llm` (OpenAI-compatible) |
@@ -96,17 +99,21 @@ It reads and writes SWE-bench and SWE-bench Pro data, so it works with datasets 
 | `failure` | Heuristic failure-mode classifier, using the categories from the Pro paper |
 | `localize` | BM25 (paths prepended, code-aware tokenizer) vs oracle file recall at token budgets. SWE-bench style prompt builder. |
 | `stats` | Per-task size stats, the trivial (1–2 line) flag, Pro-eligibility, static naming-leak check, license class (permissive / copyleft) |
-| `dockerfiles` | Generate and build per-language environments for mined tasks |
+| `dockerfiles` | Fallback per-language environments for mined tasks |
+| `envdetect` | Environment plans from the repo's own CI workflows (matrix-resolved setup-* versions, services, env), version files, dependency manifests, tox, compose. Every decision recorded as evidence. |
+| `envagent` | Setup agent: build, validate, and let a model repair the Dockerfile or test command until the task validates. Validation is the reward. Proposals are checked before use. |
+| `yamlite` | A standard-library YAML subset reader for CI and compose files (PyYAML is used when installed) |
+| `tools` | SWE-agent style tools for the gym: `str_replace_editor`, `search`, `find_file`, and function-calling schemas |
 | `llm` | A minimal OpenAI-compatible chat client (urllib) with token and cost accounting |
 
 ## Grading semantics
 
 Given a task `T` and a candidate patch `P`:
 
-1. Fresh sandbox, then `git checkout -f base_commit && git clean -fd` in the workdir.
+1. Fresh sandbox, then `git checkout -f <start> && git clean -fd` in the workdir. `<start>` is `base_commit`, or, with `start_ref = "image-head"`, the image's own HEAD, checked to descend from the base by at most 5 commits.
 2. Apply `P`. Try `git apply`, then `git apply --reject`, then `patch --fuzz`.
    - If all three fail: `resolved = false`, `failure = patch_apply_error`.
-3. **Tamper guard.**
+3. **Tamper guard.** Strict by default.
    - Any file touched by `test_patch` that `P` also changed is restored to its base version (or deleted if `P` created it).
    - Changed test files, deleted tests and added skip markers are recorded in `flags`.
 4. Apply `test_patch`. If it fails, that's a harness error, not an agent failure.
@@ -123,6 +130,8 @@ These are SWE-bench Stage III, plus Pro's repeated gold runs, plus Terminal-Benc
 - **`pre`** = base + test_patch, run `N` times. **`post`** = base + test_patch + gold_patch, run `N` times.
 - A test is `PASS` (or `FAIL`) in a set of runs only if it has that status in **every** run. Otherwise it's `FLAKY`.
 - **F2P** = FAIL in pre and PASS in post. **P2P** = PASS in pre and PASS in post. **P2F** = broken by the gold patch. Flaky tests are excluded and reported.
+- **Base run (masked F2P):** if F2P is non-empty, the tests run once more at the start commit *without* the test patch. A would-be F2P test moves to P2P when it passed there and its body is unchanged by the test patch. Such a test only failed because the new test file imports a name the fix creates. Changed tests are found by mapping test-patch hunks to their enclosing function.
+- **Environment diagnosis:** modules still missing after the fix give `environment_incomplete:<module>`, not `no_f2p`.
 - **Naming leak:** "missing symbol" errors in `pre` (ImportError, Go `undefined:`, Rust E0425, C# CS0103, Java "cannot find symbol", …) whose symbol isn't mentioned in the problem statement or interface.
 - **Verdict:**
   - `valid`: at least one F2P test, gold applies, tests parsed.
