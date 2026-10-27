@@ -30,7 +30,7 @@ from .sandbox import Sandbox
 from .task import Task, append_jsonl
 from .tools import Toolkit
 from .trajectory import Checkpoint, Episode, Step
-from .workspace import collect_diff, open_sandbox, prepare, shell_prefix
+from .workspace import collect_diff, open_sandbox, prepare, shell_prefix, start_ref
 
 INSTRUCTIONS = """You are working in a git repository at {workdir}. Resolve the task described below by editing the
 code. Each turn, run ONE bash command. The working directory persists between commands; environment
@@ -138,7 +138,7 @@ class SWEEnv:
                                            "write_file or submit"), 2
         self.steps.append(step)
         if self.checkpoint_every and self.turn % self.checkpoint_every == 0:
-            self.checkpoints.append(Checkpoint(self.turn, collect_diff(self.sb, self.task.base_commit)))
+            self.checkpoints.append(Checkpoint(self.turn, collect_diff(self.sb, start_ref(self.sb, self.task))))
         reason = self._over_budget()
         if reason:
             self._finish(reason)
@@ -156,7 +156,7 @@ class SWEEnv:
 
     def _finish(self, reason: str) -> None:
         self.done, self.exit_reason = True, reason
-        self.final_patch = collect_diff(self.sb, self.task.base_commit)
+        self.final_patch = collect_diff(self.sb, start_ref(self.sb, self.task))
         if self.checkpoint_every and (not self.checkpoints or self.checkpoints[-1].turn != self.turn):
             self.checkpoints.append(Checkpoint(self.turn, self.final_patch))
 

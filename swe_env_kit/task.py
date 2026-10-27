@@ -40,6 +40,10 @@ class EnvSpec:
     # Paths inside the environment that hold hidden material (for example a test
     # patch baked into the image). They are deleted before an agent starts.
     hidden_paths: list[str] = field(default_factory=list)
+    # Where a sandbox starts: "base" (the task's base_commit) or "image-head", the commit the
+    # image's repository is at, which must descend from base_commit. Official SWE-bench images add
+    # one environment commit on top of the base (e.g. sphinx's tox.ini gets ``pytest -rA``).
+    start_ref: str = "base"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "EnvSpec":
@@ -51,6 +55,8 @@ class EnvSpec:
         for key in ("setup", "pre_test", "test_files", "hidden_paths"):
             if isinstance(data.get(key), str):
                 data[key] = [data[key]] if data[key] else []
+        if data.get("start_ref", "base") not in ("base", "image-head"):
+            raise ValueError("start_ref must be 'base' or 'image-head'")
         if data.get("test_file_format", "path") not in TEST_FILE_FORMATS:
             raise ValueError(f"test_file_format must be one of {TEST_FILE_FORMATS}")
         return cls(**data)

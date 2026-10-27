@@ -12,7 +12,7 @@ from .logparsers import is_pass
 from .patches import parse_patch
 from .sandbox import Sandbox
 from .task import Task
-from .workspace import apply_patch, checkout_base, open_sandbox, revert_files, run_tests
+from .workspace import apply_patch, checkout_base, open_sandbox, revert_files, run_tests, start_ref
 
 _q = shlex.quote
 
@@ -136,7 +136,8 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
 
     if not patch.strip():
         r.failure = "empty_patch"
-    applied = apply_patch(sb, patch, "candidate", reset_to=task.base_commit)
+    ref = start_ref(sb, task)
+    applied = apply_patch(sb, patch, "candidate", reset_to=ref)
     r.patch_applied, r.apply_method = applied.ok, applied.method
     if applied.skipped_binary:
         r.flags.append("binary_files_skipped:" + ",".join(applied.skipped_binary))
@@ -146,7 +147,7 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
         return r
     # Always restore every path the hidden tests touch, plus anything flagged above, then make
     # sure no file or symlink sits where the test patch needs a directory.
-    failed = revert_files(sb, task.base_commit, [*test_paths, *revert])
+    failed = revert_files(sb, ref, [*test_paths, *revert])
     r.reverted_test_files = sorted(set(revert))
     _clear_parent_files(sb, test_paths)
 

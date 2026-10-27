@@ -18,7 +18,7 @@ from .logparsers import is_pass
 from .sandbox import Sandbox
 from .stats import mentioned
 from .task import Task
-from .workspace import TestRun, apply_patch, checkout_base, open_sandbox, run_tests
+from .workspace import TestRun, apply_patch, checkout_base, open_sandbox, run_tests, start_ref
 
 PASS, FAIL, FLAKY, MISSING = "PASS", "FAIL", "FLAKY", "MISSING"
 
@@ -139,12 +139,12 @@ def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = 
         for i in range(runs):
             checkout_base(sb, task)
             if with_gold:
-                gold = apply_patch(sb, task.gold_patch, "gold", reset_to=task.base_commit)
+                gold = apply_patch(sb, task.gold_patch, "gold", reset_to=start_ref(sb, task))
                 if not gold.ok:
                     res.reasons.append("gold_apply_error")
                     res.log_tails["gold_apply"] = gold.output[-3000:]
                     return res
-            tp = apply_patch(sb, task.test_patch, "tests", reset_to=None if with_gold else task.base_commit)
+            tp = apply_patch(sb, task.test_patch, "tests", reset_to=None if with_gold else start_ref(sb, task))
             if not tp.ok:
                 res.reasons.append("test_patch_apply_error")
                 res.log_tails["test_patch_apply"] = tp.output[-3000:]

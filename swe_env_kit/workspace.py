@@ -121,13 +121,41 @@ def open_sandbox(task: Task, backend: str = "docker", *, network: bool = True, k
 
 
 # --------------------------------------------------------------- repo checkout
+MAX_ENV_COMMITS = 5
+
+
+def start_ref(sb: Sandbox, task: Task) -> str:
+    """The commit this sandbox's repository is reset and diffed against."""
+    return getattr(sb, "start_ref", None) or task.base_commit
+
+
+def _image_head(sb: Sandbox, task: Task) -> str:
+    """The image's own HEAD, after checking it is a short descendant of the base (not a future fix)."""
+    head = sb.exec(f"{GIT} rev-parse HEAD", timeout=60).output.strip().splitlines()[-1]
+    if head.startswith(task.base_commit) or task.base_commit.startswith(head):
+        return task.base_commit
+    b, h = _q(task.base_commit), _q(head)
+    if not sb.exec(f"{GIT} merge-base --is-ancestor {b} {h}", timeout=120).ok:
+        raise WorkspaceError(f"image HEAD {head[:12]} does not descend from base {task.base_commit[:12]}")
+    ahead = sb.exec(f"{GIT} rev-list --count {b}..{h}", timeout=120).output.strip().splitlines()[-1]
+    if not ahead.isdigit() or int(ahead) > MAX_ENV_COMMITS:
+        raise WorkspaceError(f"image HEAD is {ahead} commits past the base; refusing to use it as the start "
+                             "(it may contain the fix). Use start_ref='base'.")
+    return head
+
+
 def checkout_base(sb: Sandbox, task: Task) -> None:
-    """Put the repository at ``base_commit`` with a clean tree (cloning it for local sandboxes)."""
-    base = _q(task.base_commit)
+    """Reset the repository to the task's start commit with a clean tree (cloning it for local sandboxes).
+
+    The start commit is ``base_commit``, or, with ``env.start_ref == "image-head"``, the commit the
+    image ships (recorded on first use, so later resets in the same sandbox return to it).
+    """
     if isinstance(sb, LocalSandbox):
         has_repo = (Path(sb.workdir) / ".git").exists()
     else:
         has_repo = sb.exec(f"{GIT} rev-parse --is-inside-work-tree", timeout=60).ok
+    if has_repo and task.env.start_ref == "image-head" and not getattr(sb, "start_ref", None):
+        sb.start_ref = _image_head(sb, task)
     if not has_repo:
         if not isinstance(sb, LocalSandbox):
             raise WorkspaceError(f"no git repository at {sb.workdir} in the image")
@@ -136,9 +164,10 @@ def checkout_base(sb: Sandbox, task: Task) -> None:
                       workdir=str(Path(sb.workdir).parent))
         if not res.ok:
             raise WorkspaceError(f"clone failed: {res.output[-500:]}")
-    res = sb.exec(f"{GIT} checkout -q -f {base} && {GIT} clean -fdq", timeout=600)
+    ref = start_ref(sb, task)
+    res = sb.exec(f"{GIT} checkout -q -f {_q(ref)} && {GIT} clean -fdq", timeout=600)
     if not res.ok:
-        raise WorkspaceError(f"checkout {task.base_commit} failed: {res.output[-500:]}")
+        raise WorkspaceError(f"checkout {ref} failed: {res.output[-500:]}")
 
 
 def strip_future_history(sb: Sandbox, base_commit: str) -> ExecResult:
@@ -190,7 +219,7 @@ def prepare(sb: Sandbox, task: Task, *, for_agent: bool = False) -> None:
     checkout_base(sb, task)
     if for_agent:
         remove_hidden(sb, task.env.hidden_paths)
-        strip_future_history(sb, task.base_commit)
+        strip_future_history(sb, start_ref(sb, task))
 
 
 # -------------------------------------------------------------------- patches

@@ -169,3 +169,59 @@ def test_reverted_conftest_is_informational(fix_task):
     p = fix_task.gold_patch + patch_from(fix_task, {"conftest.py": "# my debugging helpers\n"})
     r = grade(fix_task, p, backend="local")
     assert r.resolved and "edits_test_runner_config:conftest.py" in r.flags
+
+
+# ------------------------------------------------- image environment commits (start_ref)
+import subprocess as _sp
+
+from swe_env_kit.gym import SWEEnv
+from swe_env_kit.workspace import WorkspaceError, start_ref
+
+
+def _image_like_sandbox(task, extra_commits=1):
+    """A sandbox whose repo already exists, like a prebuilt image: base + N environment commits."""
+    sb = LocalSandbox()
+    _sp.run(["git", "clone", "-q", task.clone_url, sb.workdir], check=True)
+    _sp.run(["git", "-C", sb.workdir, "checkout", "-q", task.base_commit], check=True)
+    for i in range(extra_commits):
+        with open(f"{sb.workdir}/ENVIRONMENT.txt", "a") as fh:
+            fh.write(f"env setting {i}\n")
+        _sp.run(["git", "-C", sb.workdir, "add", "-A"], check=True)
+        _sp.run(["git", "-C", sb.workdir, "-c", "user.name=env", "-c", "user.email=e@x", "commit", "-qm", "env"],
+                check=True)
+    return sb
+
+
+def test_image_head_keeps_the_environment_commit(fix_task):
+    t = copy.deepcopy(fix_task)
+    t.env.start_ref = "image-head"
+    with _image_like_sandbox(t) as sb:
+        checkout_base(sb, t)
+        assert start_ref(sb, t) != t.base_commit
+        assert sb.read_file("ENVIRONMENT.txt") == "env setting 0\n"   # survives the reset
+        sb.write_file("minishop/x.py", "X = 1\n")
+        diff = collect_diff(sb, start_ref(sb, t))
+        assert "ENVIRONMENT.txt" not in diff and "minishop/x.py" in diff
+        r = grade_in_sandbox(sb, t, t.gold_patch)
+        assert r.resolved, r
+
+
+def grade_in_sandbox(sb, t, patch):
+    from swe_env_kit.grade import grade_in
+
+    return grade_in(sb, t, patch)
+
+
+def test_image_head_far_past_the_base_is_refused(demo_tasks):
+    t = copy.deepcopy(demo_tasks["fix"])
+    t.env.start_ref = "image-head"
+    with _image_like_sandbox(t, extra_commits=6) as sb:
+        with pytest.raises(WorkspaceError, match="refusing"):
+            checkout_base(sb, t)
+
+
+def test_default_start_is_the_base_even_with_extra_commits(fix_task):
+    with _image_like_sandbox(fix_task) as sb:
+        checkout_base(sb, fix_task)
+        assert start_ref(sb, fix_task) == fix_task.base_commit
+        assert not sb.exec("test -e ENVIRONMENT.txt").ok

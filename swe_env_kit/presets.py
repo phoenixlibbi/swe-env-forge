@@ -100,10 +100,11 @@ def swebench_env(repo: str, instance_id: str, row: dict | None = None) -> EnvSpe
     if parsed:
         pre, cmd = parsed
         return EnvSpec(image=image, platform="linux/amd64", workdir=SWEBENCH_WORKDIR, setup=list(SWEBENCH_SETUP),
-                       pre_test=pre, test_command=cmd, test_file_format="none", log_parser=parser)
+                       pre_test=pre, test_command=cmd, test_file_format="none", log_parser=parser,
+                       start_ref="image-head")
     cmd, _p, fmt = SWEBENCH_REPOS.get(repo, (_PYTEST, "pytest", "path"))
     return EnvSpec(image=image, platform="linux/amd64", workdir=SWEBENCH_WORKDIR, setup=list(SWEBENCH_SETUP),
-                   test_command=cmd, test_file_format=fmt, log_parser=parser)
+                   test_command=cmd, test_file_format=fmt, log_parser=parser, start_ref="image-head")
 
 
 # ------------------------------------------------------------------ SWE-bench Pro

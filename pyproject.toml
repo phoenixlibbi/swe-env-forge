@@ -31,3 +31,4 @@ packages = ["swe_env_kit"]
 markers = ["docker: needs a Docker daemon and network (deselect with -m 'not docker')",
            "network: needs internet access"]
 addopts = "-m 'not docker and not network'"
+testpaths = ["tests"]
