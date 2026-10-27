@@ -169,4 +169,6 @@ def test_generic_rows_with_swebench_style_specs():
     t = from_generic(row)
     assert t.env.test_command == "cargo test" and t.env.log_parser == "cargo"
     assert t.env.pre_test == ["echo hi", "cargo build"] and t.env.test_file_format == "none"
+    baked = from_generic({**row, "dockerfile": "FROM rust\nRUN echo hi\n"})
+    assert baked.env.pre_test == ["cargo build"]       # image setup already in the Dockerfile is not repeated
     assert "spec_dict" not in t.metadata
