@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Run artifacts: never commit real trajectories, logs or private tasks
+runs/
+private/
+.swekit/
+*.traj
+**/trajectories/
+!tests/fixtures/**
+
+# Secrets
+.env
+*.env
