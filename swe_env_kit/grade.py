@@ -170,7 +170,7 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
     if run.timed_out:
         r.flags.append("tests_timed_out")
     if not run.parsed:
-        r.failure = "tests_not_run"
+        r.failure = r.failure or "tests_not_run"  # e.g. compile errors; keep "empty_patch" when it applies
         return r
     s = score(task, run.statuses)
     for k, v in s.items():
