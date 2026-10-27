@@ -126,9 +126,11 @@ class Task:
         """Test files to run: explicit ``env.test_files``, else files in the test patch."""
         if self.env.test_files:
             return list(self.env.test_files)
-        from .patches import parse_patch  # local import: patches does not need Task
+        from .languages import language_of  # local imports: these modules do not need Task
+        from .patches import parse_patch
 
-        return [f.path for f in parse_patch(self.test_patch) if not f.deleted]
+        # fixtures (json, txt, images, ...) live in the test patch too but are not test files
+        return [f.path for f in parse_patch(self.test_patch) if not f.deleted and language_of(f.path)]
 
 
 def _as_list(value: Any) -> list[str]:

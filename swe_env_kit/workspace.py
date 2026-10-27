@@ -7,8 +7,11 @@ import hashlib
 import os
 import re
 import shlex
+import secrets
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,7 +25,9 @@ from .sandbox import (DockerSandbox, ExecResult, LocalSandbox, Sandbox, SandboxE
 from .task import Task
 
 START_MARK, END_MARK = ">>>>> swekit tests start", ">>>>> swekit tests end"
-GIT = "git -c core.hooksPath=/dev/null -c advice.detachedHead=false -c safe.directory=*"
+# safe.directory=* is quoted: an unquoted * would be glob-expanded by files the agent creates.
+GIT = "git -c core.hooksPath=/dev/null -c advice.detachedHead=false -c 'safe.directory=*'"
+_ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class WorkspaceError(RuntimeError):
@@ -137,27 +142,39 @@ def checkout_base(sb: Sandbox, task: Task) -> None:
 
 
 def strip_future_history(sb: Sandbox, base_commit: str) -> ExecResult:
-    """Delete every ref, remote, stash and reflog entry that could reveal commits after ``base_commit``.
+    """Remove every trace of commits after ``base_commit`` from the repository.
 
-    Afterwards ``git rev-list --all --not <base>`` must be empty, so ``git log --all`` cannot
-    show the fix. Tags that point to ancestors of the base are kept.
+    Deletes refs that are not ancestors of the base (tags on ancestors are kept), remotes,
+    stashes, reflogs, ``*_HEAD`` files, ``.keep`` packs and alternates (after copying their
+    objects in), then repacks and prunes. Finally checks that every commit object left in
+    the store is an ancestor of the base, so neither ``git log --all`` nor ``git show <sha>``
+    can reveal the fix.
     """
     b = _q(base_commit)
     script = f"""
 set -e
 {GIT} checkout -q -f --detach {b}
+gitdir=$({GIT} rev-parse --git-dir)
 for r in $({GIT} remote); do {GIT} remote remove "$r"; done
 {GIT} for-each-ref --format='%(refname)' | while read -r ref; do
   if ! {GIT} merge-base --is-ancestor "$ref" {b} 2>/dev/null; then {GIT} update-ref -d "$ref"; fi
 done
 {GIT} stash clear 2>/dev/null || true
+{GIT} worktree prune 2>/dev/null || true
+rm -f "$gitdir"/ORIG_HEAD "$gitdir"/FETCH_HEAD "$gitdir"/MERGE_HEAD "$gitdir"/CHERRY_PICK_HEAD "$gitdir"/REVERT_HEAD
+rm -f "$gitdir"/objects/pack/*.keep
 {GIT} reflog expire --expire=now --all
-{GIT} gc -q --prune=now 2>/dev/null || {GIT} prune --expire=now
-left=$({GIT} rev-list --all --not {b} | head -n 1)
-if [ -n "$left" ]; then echo "future commit still reachable: $left"; exit 3; fi
+{GIT} repack -a -d -q
+rm -f "$gitdir"/objects/info/alternates
+{GIT} prune --expire=now
+{GIT} cat-file --batch-all-objects --batch-check='%(objecttype) %(objectname)' | awk '$1=="commit"{{print $2}}' | sort > "$gitdir"/swekit-all
+{GIT} rev-list {b} | sort > "$gitdir"/swekit-anc
+left=$(comm -23 "$gitdir"/swekit-all "$gitdir"/swekit-anc | head -n 1)
+rm -f "$gitdir"/swekit-all "$gitdir"/swekit-anc
+if [ -n "$left" ]; then echo "future commit still in the object store: $left"; exit 3; fi
 echo history-stripped
 """
-    res = sb.exec(script, timeout=1800)
+    res = sb.exec(script, timeout=3600)
     if not res.ok:
         raise WorkspaceError(f"history stripping failed: {res.output[-800:]}")
     return res
@@ -210,20 +227,27 @@ def apply_patch(sb: Sandbox, patch: str, label: str = "patch", *, reset_to: str 
         outputs.append(f"$ {name}\n{res.output}")
         if res.ok:
             if name != "git apply":
-                sb.exec("find . -name '*.rej' -not -path './.git/*' -delete; "
-                        "find . -name '*.orig' -not -path './.git/*' -delete", timeout=120)
+                # remove only the untracked leftovers; tracked *.orig / *.rej files are real content
+                sb.exec(f"{GIT} clean -fqx -- '*.rej' '*.orig'", timeout=120)
             return ApplyResult(True, name, "\n".join(outputs), binaries)
         if not reset_to:
             break  # without a reset point, retries could double-apply hunks
     return ApplyResult(False, "", "\n".join(outputs), binaries)
 
 
-def revert_files(sb: Sandbox, base_commit: str, paths: list[str]) -> None:
-    """Restore files to their base version (deleting ones that did not exist at base)."""
-    for p in paths:
-        qp = _q(p)
-        sb.exec(f"if {GIT} cat-file -e {_q(base_commit)}:{qp} 2>/dev/null; then "
-                f"{GIT} checkout -q {_q(base_commit)} -- {qp}; else rm -f {qp}; fi", timeout=120)
+def revert_files(sb: Sandbox, base_commit: str, paths: list[str]) -> list[str]:
+    """Restore paths to their base version (removing ones that did not exist at base).
+
+    Returns the paths that could not be restored.
+    """
+    failed = []
+    for p in dict.fromkeys(paths):
+        qp, qb = _q(p), _q(base_commit)
+        res = sb.exec(f"rm -rf -- {qp}; if {GIT} cat-file -e {qb}:{qp} 2>/dev/null; then "
+                      f"{GIT} checkout -q {qb} -- {qp}; fi", timeout=120)
+        if not res.ok:
+            failed.append(p)
+    return failed
 
 
 def collect_diff(sb: Sandbox, base_commit: str, exclude: list[str] | None = None) -> str:
@@ -251,6 +275,9 @@ class TestRun:
 
 
 def _env_lines(task: Task) -> list[str]:
+    for k in task.env.env_vars:
+        if not _ENV_KEY.match(k):
+            raise WorkspaceError(f"invalid environment variable name {k!r}")
     return [f"export {k}={_q(v)}" for k, v in task.env.env_vars.items()]
 
 
@@ -259,40 +286,64 @@ def shell_prefix(task: Task, sb: Sandbox) -> list[str]:
     return [*_env_lines(task), *task.env.setup, f"cd {_q(sb.workdir)}"]
 
 
-def test_script(task: Task, sb: Sandbox) -> str:
-    files = task.test_files()
-    if task.env.run_script:
-        sb.write_file(f"{sb.scratch}/run_script.sh", task.env.run_script)
-        sb.write_file(f"{sb.scratch}/parser.py", task.env.parser_script or "")
-        rendered = render_test_files(files, task.env.test_file_format)
-        s = sb.scratch
-        run = (f"bash {s}/run_script.sh {_q(rendered)} > {s}/stdout.log 2> {s}/stderr.log; "
-               f"(python3 {s}/parser.py {s}/stdout.log {s}/stderr.log {s}/output.json "
-               f"|| python {s}/parser.py {s}/stdout.log {s}/stderr.log {s}/output.json) >/dev/null 2>&1; "
-               f"echo; cat {s}/output.json 2>/dev/null; echo")
-    elif task.env.test_command:
-        run = task.env.test_command.replace("{test_files}", render_test_files(files, task.env.test_file_format))
-    else:
-        raise WorkspaceError(f"{task.instance_id}: env has neither test_command nor run_script")
-    return "\n".join([*shell_prefix(task, sb), *task.env.pre_test, f"echo '{START_MARK}'", run,
-                      f"echo '{END_MARK}' $?"])
+def _host_parse(parser_script: str, stdout: str, stderr: str) -> str:
+    """Run a trusted Pro ``parser.py`` on the host, away from code under test."""
+    with tempfile.TemporaryDirectory(prefix="swekit-parse-") as tmp:
+        d = Path(tmp)
+        (d / "parser.py").write_text(parser_script, encoding="utf-8")
+        (d / "stdout.log").write_text(stdout, encoding="utf-8")
+        (d / "stderr.log").write_text(stderr, encoding="utf-8")
+        res = subprocess.run([sys.executable, "-I", str(d / "parser.py"), str(d / "stdout.log"),
+                              str(d / "stderr.log"), str(d / "output.json")], capture_output=True, text=True,
+                             timeout=300, cwd=tmp)
+        out = d / "output.json"
+        if res.returncode != 0 or not out.exists():
+            raise WorkspaceError(f"parser.py failed: {(res.stderr or res.stdout)[-500:]}")
+        return out.read_text(encoding="utf-8")
 
 
 def run_tests(sb: Sandbox, task: Task, timeout: float | None = None, label: str = "tests") -> TestRun:
-    script = test_script(task, sb)
-    sb.write_file(f"{sb.scratch}/{label}.sh", script)
-    res = sb.exec(f"bash {sb.scratch}/{label}.sh 2>&1", timeout=timeout or task.env.timeout)
-    log = res.output
-    segment = log
-    if START_MARK in log:
-        segment = log.split(START_MARK, 1)[1]
-        segment = segment.split(END_MARK, 1)[0] if END_MARK in segment else segment
+    """Run the task's tests in ``sb`` and parse the result.
+
+    Each run uses a fresh random directory and random start / end markers, and the script
+    deletes itself once started, so code under test cannot easily forge the markers. Pro
+    style tasks run ``run_script.sh`` in the sandbox, but their ``parser.py`` runs on the
+    host, where the code under test cannot rewrite it.
+    """
+    nonce = secrets.token_hex(8)
+    run_dir = f"{sb.scratch}/run-{nonce}"
+    start, end = f"{START_MARK} {nonce}", f"{END_MARK} {nonce}"
+    files = task.test_files()
+    rendered = render_test_files(files, task.env.test_file_format)
     if task.env.run_script:
-        # keep the raw runner output for debugging next to the parsed JSON
+        sb.write_file(f"{run_dir}/run_script.sh", task.env.run_script)
+        run = (f"bash {_q(run_dir + '/run_script.sh')} {rendered} > {_q(run_dir + '/stdout.log')} "
+               f"2> {_q(run_dir + '/stderr.log')}")
+    elif task.env.test_command:
+        run = task.env.test_command.replace("{test_files}", rendered)
+    else:
+        raise WorkspaceError(f"{task.instance_id}: env has neither test_command nor run_script")
+    script = "\n".join(['rm -f -- "$0"', *shell_prefix(task, sb), *task.env.pre_test, f"echo '{start}'", run,
+                        f"echo; echo '{end}' $?"])
+    path = f"{run_dir}/{label}.sh"
+    sb.write_file(path, script)
+    res = sb.exec(f"bash {_q(path)} 2>&1", timeout=timeout or task.env.timeout)
+    log = res.output
+    if task.env.run_script:
+        outs = {}
         for f in ("stdout.log", "stderr.log"):
             try:
-                log += f"\n----- {f} -----\n" + sb.read_file(f"{sb.scratch}/{f}")[-200_000:]
+                outs[f] = sb.read_file(f"{run_dir}/{f}")
             except SandboxError:
-                pass
+                outs[f] = ""
+        try:
+            segment = _host_parse(task.env.parser_script or "", outs["stdout.log"], outs["stderr.log"])
+        except (WorkspaceError, subprocess.SubprocessError, OSError) as exc:
+            segment = ""
+            log += f"\n[swekit] {exc}"
+        log += f"\n----- stdout.log -----\n{outs['stdout.log'][-200_000:]}\n----- stderr.log -----\n{outs['stderr.log'][-50_000:]}"
+    else:
+        segment = log.split(start, 1)[1] if start in log else log
+        segment = segment.split(end, 1)[0]
     statuses = parse_log(segment, task.env.log_parser)
     return TestRun(statuses, log, res.exit_code, res.duration, res.timed_out)

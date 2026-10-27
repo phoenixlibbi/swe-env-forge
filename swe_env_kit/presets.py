@@ -132,7 +132,7 @@ def render_test_files(files: list[str], fmt: str) -> str:
     if fmt == "none":
         return ""
     if fmt == "comma":
-        return ",".join(files)
+        return shlex.quote(",".join(files)) if files else "''"
     if fmt in ("dotted-module", "django"):
         mods = []
         for f in files:
