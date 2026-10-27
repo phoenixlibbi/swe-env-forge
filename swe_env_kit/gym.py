@@ -5,6 +5,8 @@ hidden paths removed) and returns the agent-visible task. ``step(action)`` runs 
 action and returns ``(observation, done, info)``. Supported actions::
 
     {"type": "bash", "command": "pytest -x tests/"}
+    {"type": "editor", "command": "str_replace", "path": "pkg/x.py", "old_str": "...", "new_str": "..."}
+    {"type": "search", "pattern": "def apply_discount"}       # see swe_env_kit.tools for all tools
     {"type": "write_file", "path": "pkg/x.py", "content": "..."}
     {"type": "submit"}
 
@@ -26,6 +28,7 @@ from typing import Any, Callable
 from .grade import grade
 from .sandbox import Sandbox
 from .task import Task, append_jsonl
+from .tools import Toolkit
 from .trajectory import Checkpoint, Episode, Step
 from .workspace import collect_diff, open_sandbox, prepare, shell_prefix
 
@@ -70,6 +73,7 @@ class SWEEnv:
         self.close()
         self.sb = open_sandbox(self.task, self.backend, network=self.network, keep=self.keep)
         prepare(self.sb, self.task, for_agent=True)
+        self.tools = Toolkit(self.sb)
         self.sb.write_file(f"{self.sb.scratch}/cwd", self.sb.workdir + "\n")
         self.turn, self.cost, self.started = 0, 0.0, time.monotonic()
         self.done, self.exit_reason, self.steps, self.checkpoints, self.final_patch = False, "", [], [], ""
@@ -120,6 +124,9 @@ class SWEEnv:
                     cost=float(action.get("cost") or 0.0), thought=str(action.get("thought") or ""))
         if kind == "bash":
             step.output, step.exit_code, step.duration, step.timed_out = self._bash(str(action.get("command", "")))
+        elif kind in ("editor", "search", "find_file"):
+            step.output, step.exit_code = self.tools.run(action)
+            step.output = truncate(step.output, self.budget.max_output_chars)
         elif kind == "write_file":
             try:
                 self.sb.write_file(str(action["path"]), str(action.get("content", "")))
@@ -127,7 +134,8 @@ class SWEEnv:
             except Exception as exc:  # report to the agent, do not crash the episode
                 step.output, step.exit_code = f"write failed: {exc}", 1
         else:
-            step.output, step.exit_code = f"unknown action type {kind!r}; use bash, write_file or submit", 2
+            step.output, step.exit_code = (f"unknown action type {kind!r}; use bash, editor, search, find_file, "
+                                           "write_file or submit"), 2
         self.steps.append(step)
         if self.checkpoint_every and self.turn % self.checkpoint_every == 0:
             self.checkpoints.append(Checkpoint(self.turn, collect_diff(self.sb, self.task.base_commit)))
