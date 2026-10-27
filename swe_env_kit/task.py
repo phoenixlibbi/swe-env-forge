@@ -37,6 +37,9 @@ class EnvSpec:
     parser_script: str | None = None
     env_vars: dict[str, str] = field(default_factory=dict)
     timeout: int = 1800
+    # Paths inside the environment that hold hidden material (for example a test
+    # patch baked into the image). They are deleted before an agent starts.
+    hidden_paths: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "EnvSpec":
@@ -45,7 +48,7 @@ class EnvSpec:
         unknown = sorted(set(data) - known)
         if unknown:
             raise ValueError(f"unknown env field(s): {', '.join(unknown)}")
-        for key in ("setup", "pre_test", "test_files"):
+        for key in ("setup", "pre_test", "test_files", "hidden_paths"):
             if isinstance(data.get(key), str):
                 data[key] = [data[key]] if data[key] else []
         if data.get("test_file_format", "path") not in TEST_FILE_FORMATS:
