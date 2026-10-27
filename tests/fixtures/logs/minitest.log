@@ -1,0 +1,3 @@
+CartTest#test_totals = 0.00 s = .
+CartTest#test_discounts = 0.00 s = F
+CartTest#test_db = 0.01 s = E

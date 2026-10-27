@@ -1,0 +1,1 @@
+{"tests": [{"name": "test/user.js | User | should exist", "status": "PASSED"}, {"name": "test/user.js | User | should fail", "status": "FAILED"}]}

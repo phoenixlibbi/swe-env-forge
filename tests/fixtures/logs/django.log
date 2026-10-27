@@ -1,0 +1,6 @@
+test_add (model_fields.test_integer.IntegerFieldTests) ... ok
+test_bad (model_fields.test_integer.IntegerFieldTests) ... FAIL
+test_err (model_fields.test_integer.IntegerFieldTests) ... ERROR
+test_skip (model_fields.test_integer.IntegerFieldTests) ... skipped 'no db'
+test_multi (model_fields.test_integer.IntegerFieldTests) ... System check identified no issues (0 silenced).
+ok

@@ -1,0 +1,2 @@
+> jest --json
+{"numFailedTests":1,"testResults":[{"name":"/app/src/cart.test.ts","assertionResults":[{"ancestorTitles":["Cart"],"title":"totals","fullName":"Cart totals","status":"passed"},{"ancestorTitles":["Cart"],"title":"discounts","fullName":"Cart discounts","status":"failed"},{"ancestorTitles":[],"title":"later","fullName":"later","status":"todo"}]}]}

@@ -1,0 +1,4 @@
+TAP version 13
+ok 1 - totals
+not ok 2 - discounts
+ok 3 - slow # SKIP not now

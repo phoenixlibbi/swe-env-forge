@@ -1,0 +1,5 @@
+{"Time":"2026-01-01T00:00:00Z","Action":"run","Package":"x/cart","Test":"TestTotal"}
+{"Time":"2026-01-01T00:00:00Z","Action":"pass","Package":"x/cart","Test":"TestTotal","Elapsed":0}
+{"Time":"2026-01-01T00:00:00Z","Action":"fail","Package":"x/cart","Test":"TestDiscount/ten_percent","Elapsed":0}
+{"Time":"2026-01-01T00:00:00Z","Action":"skip","Package":"x/cart","Test":"TestSlow","Elapsed":0}
+{"Time":"2026-01-01T00:00:00Z","Action":"fail","Package":"x/cart","Elapsed":0}

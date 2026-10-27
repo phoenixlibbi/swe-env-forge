@@ -1,0 +1,6 @@
+[ RUN      ] CartTest.Totals
+[       OK ] CartTest.Totals (0 ms)
+[ RUN      ] CartTest.Discounts
+[  FAILED  ] CartTest.Discounts (1 ms)
+[  SKIPPED ] CartTest.Slow (0 ms)
+[  FAILED  ] 1 test, listed below:

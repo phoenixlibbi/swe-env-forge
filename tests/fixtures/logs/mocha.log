@@ -1,0 +1,6 @@
+{
+  "stats": {"tests": 3, "passes": 1, "failures": 1, "pending": 1},
+  "passes": [{"title": "totals", "fullTitle": "Cart totals"}],
+  "failures": [{"title": "discounts", "fullTitle": "Cart discounts", "err": {"message": "x"}}],
+  "pending": [{"title": "later", "fullTitle": "Cart later"}]
+}

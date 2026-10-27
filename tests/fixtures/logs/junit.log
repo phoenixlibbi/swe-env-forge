@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.x.CartTest" tests="3">
+  <testcase classname="com.x.CartTest" name="totals" time="0.01"/>
+  <testcase classname="com.x.CartTest" name="discounts"><failure message="boom"/></testcase>
+  <testcase classname="com.x.CartTest" name="slow"><skipped/></testcase>
+  <testcase classname="com.x.CartTest" name="db"><error message="x"/></testcase>
+</testsuite>

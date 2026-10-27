@@ -1,0 +1,1 @@
+{"version":"3.12","examples":[{"id":"./spec/cart_spec.rb[1:1]","full_description":"Cart totals","status":"passed"},{"id":"./spec/cart_spec.rb[1:2]","full_description":"Cart discounts","status":"failed"},{"id":"./spec/cart_spec.rb[1:3]","full_description":"Cart later","status":"pending"}]}

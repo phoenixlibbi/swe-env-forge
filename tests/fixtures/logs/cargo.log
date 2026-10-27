@@ -1,0 +1,5 @@
+running 3 tests
+test cart::tests::totals ... ok
+test cart::tests::discounts ... FAILED
+test cart::tests::slow ... ignored
+test src/lib.rs - cart::Cart::total (line 10) ... ok

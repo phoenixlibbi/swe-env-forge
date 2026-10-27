@@ -1,0 +1,4 @@
+  Passed Shop.Tests.CartTests.Totals [3 ms]
+  Failed Shop.Tests.CartTests.Discounts [1 ms]
+  Skipped Shop.Tests.CartTests.Slow [1 ms]
+Failed!  - Failed:     1, Passed:     1, Skipped:     1, Total:     3

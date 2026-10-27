@@ -1,0 +1,5 @@
+=== RUN   TestTotal
+--- PASS: TestTotal (0.00s)
+=== RUN   TestDiscount
+    --- FAIL: TestDiscount/ten_percent (0.00s)
+--- FAIL: TestDiscount (0.00s)

@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+collected 4 items
+
+tests/test_cart.py .F.x                                                  [100%]
+=========================== short test summary info ============================
+PASSED tests/test_cart.py::test_total
+PASSED tests/test_cart.py::test_empty[a-b]
+XFAIL tests/test_cart.py::test_future - not done
+FAILED tests/test_cart.py::test_discount - AssertionError: assert 9 == 10
+ERROR tests/test_cart.py::test_db - ConnectionError: refused - again
+========================= 1 failed, 2 passed in 0.12s ==========================

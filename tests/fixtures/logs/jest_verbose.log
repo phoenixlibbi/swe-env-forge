@@ -1,0 +1,5 @@
+ PASS  src/cart.test.ts
+  Cart
+    ✓ totals (3 ms)
+    ✕ discounts (1 ms)
+    ○ skipped later
