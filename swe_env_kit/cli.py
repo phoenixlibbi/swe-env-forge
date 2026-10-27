@@ -404,7 +404,8 @@ def cmd_import_traj(args) -> int:
         ep = from_swe_agent(p)
         if args.grade and ep.instance_id in tasks:
             ep.grade = grade(tasks[ep.instance_id], ep.patch, args.backend).to_dict()
-        ep.save(args.output)
+        ep.metadata.setdefault("source_file", str(p))
+        ep.save(args.output, unique=True)
         n += 1
         log(f"{ep.instance_id}: {ep.exit_reason} turns={ep.turns} cost=${ep.cost:.2f}"
             + (f" resolved={ep.grade['resolved']}" if ep.grade else ""))

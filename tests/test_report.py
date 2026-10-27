@@ -106,3 +106,24 @@ def test_llm_judge_parses_bucket():
             return "It kept re-running the same test.\nBUCKET: stuck_in_loop", None
 
     assert llm_judge(ep(exit_reason="max_turns"), C())["bucket"] == "stuck_in_loop"
+
+
+def test_ungraded_episodes_are_not_counted_as_failures():
+    graded = ep("a", grade={"resolved": True, "dense": 1.0, "flags": []})
+    ungraded = ep("b", grade=None)
+    ungraded.grade = None
+    r = build_report([graded, ungraded], name="mix")
+    assert r["n"] == 1 and r["ungraded"] == 1 and r["episodes"] == 2
+    assert r["slices"]["overall"]["all"]["resolved_pct"] == 100.0
+    assert r["failure_modes"]["failures"] == 0
+
+
+def test_repeated_attempts_are_kept(tmp_path):
+    first, second = ep("t"), ep("t")
+    first.save(tmp_path, unique=True)
+    second.save(tmp_path, unique=True)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["t", "t@2"]
+    from swe_env_kit.trajectory import load_episodes
+
+    eps = load_episodes(tmp_path)
+    assert len(eps) == 2 and eps[1].metadata["attempt"] == 2

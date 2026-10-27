@@ -57,8 +57,20 @@ class Episode:
         d["n_steps"] = len(self.steps)
         return d
 
-    def save(self, out_dir: str | Path) -> Path:
+    def save(self, out_dir: str | Path, unique: bool = False) -> Path:
+        """Write the episode to ``out_dir/<instance_id>``.
+
+        With ``unique``, a second episode of the same task (another attempt, another turn of a
+        multi-turn run) goes to ``<instance_id>@2``, ``@3``, ... instead of overwriting the first.
+        """
         out = Path(out_dir) / self.instance_id
+        if unique:
+            k = 1
+            while (out / "episode.json").exists():
+                k += 1
+                out = Path(out_dir) / f"{self.instance_id}@{k}"
+            if k > 1:
+                self.metadata["attempt"] = k
         out.mkdir(parents=True, exist_ok=True)
         with (out / "trajectory.jsonl").open("w", encoding="utf-8") as fh:
             for s in self.steps:

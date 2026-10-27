@@ -92,8 +92,13 @@ def build_report(episodes: list[Episode] | None = None, grades: list[dict[str, A
                  tasks: list[Task] | None = None, name: str = "") -> dict[str, Any]:
     episodes = episodes or []
     task_map = {t.instance_id: t for t in tasks or []}
-    results = [{"instance_id": e.instance_id, **(e.grade or {})} for e in episodes] if episodes else list(grades or [])
+    graded_eps = [e for e in episodes if e.grade]
+    results = ([{"instance_id": e.instance_id, **e.grade} for e in graded_eps] if episodes
+               else list(grades or []))
     rep: dict[str, Any] = {"name": name, "n": len(results), "slices": slices(results, task_map)}
+    if episodes:
+        # ungraded episodes (e.g. imported without --grade) count for behaviour, never as failures
+        rep["episodes"], rep["ungraded"] = len(episodes), len(episodes) - len(graded_eps)
     if episodes:
         rep["agent"] = sorted({e.agent for e in episodes})
         rep["submitted_pct"] = round(100.0 * sum(e.exit_reason == "submitted" for e in episodes) / len(episodes), 1)
@@ -102,8 +107,8 @@ def build_report(episodes: list[Episode] | None = None, grades: list[dict[str, A
         rep["mean_turns"] = round(statistics.fmean(e.turns for e in episodes), 1)
         rep["mean_cost"] = round(statistics.fmean(e.cost for e in episodes), 4)
         rep["total_cost"] = round(sum(e.cost for e in episodes), 4)
-        rep["budget_curves"] = budget_curves(episodes)
-        rep["failure_modes"] = distribution(episodes, task_map)
+        rep["budget_curves"] = budget_curves(graded_eps)
+        rep["failure_modes"] = distribution(graded_eps, task_map)
     flags = defaultdict(int)
     for r in results:
         for f in r.get("flags") or []:
@@ -124,11 +129,12 @@ def to_markdown(reports: list[dict[str, Any]]) -> str:
     names = [r.get("name") or (", ".join(r.get("agent", [])) or f"run {i + 1}") for i, r in enumerate(reports)]
     out = ["# swe-env-kit report", ""]
     head = ["metric", *names]
-    rows = [["tasks", *[r["n"] for r in reports]],
-            ["resolved %", *[r["slices"].get("overall", {}).get("all", {}).get("resolved_pct", 0) for r in reports]],
-            ["mean dense reward", *[r["slices"].get("overall", {}).get("all", {}).get("mean_dense", 0) for r in reports]]]
+    rows = [["graded episodes", *[r["n"] for r in reports]],
+            ["resolved %", *[r["slices"].get("overall", {}).get("all", {}).get("resolved_pct", "n/a") for r in reports]],
+            ["mean dense reward", *[r["slices"].get("overall", {}).get("all", {}).get("mean_dense", "n/a") for r in reports]]]
     if all("budget_curves" in r for r in reports):
-        rows += [["submitted %", *[r["submitted_pct"] for r in reports]],
+        rows += [["ungraded episodes", *[r.get("ungraded", 0) for r in reports]],
+                 ["submitted %", *[r["submitted_pct"] for r in reports]],
                  ["mean turns", *[r["mean_turns"] for r in reports]],
                  ["mean cost ($)", *[r["mean_cost"] for r in reports]]]
     out += [_table(head, rows), ""]
