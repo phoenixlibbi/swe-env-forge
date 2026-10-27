@@ -280,7 +280,8 @@ def cmd_validate(args) -> int:
     kept, reports, counts = [], [], {"valid": 0, "invalid": 0, "error": 0}
 
     def one(t):
-        return validate(t, args.backend, runs=args.runs, timeout=args.timeout, naming=args.naming)
+        return validate(t, args.backend, runs=args.runs, timeout=args.timeout, naming=args.naming,
+                        base_run=not args.no_base_run)
 
     for t, res in _parallel(tasks, one, args.workers):
         counts[res.verdict] = counts.get(res.verdict, 0) + 1
@@ -555,6 +556,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--timeout", type=float)
     p.add_argument("--naming", choices=["warn", "invalid"], default="warn")
+    p.add_argument("--no-base-run", action="store_true",
+                   help="skip the extra run at the start commit that catches F2P tests masked by import errors")
     p.add_argument("--keep-invalid", action="store_true")
     p.add_argument("--report")
     _add_selection(p)

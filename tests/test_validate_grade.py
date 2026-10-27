@@ -57,8 +57,30 @@ def test_grade_reverts_hidden_test_edits(demo_tasks):
     assert "edits_hidden_test_file:tests/test_pricing.py" in r.flags
 
 
+def test_base_run_unmasks_tests_that_only_failed_to_import(demo_tasks):
+    # the new test file imports low_stock_items, so before the fix the whole file fails to import;
+    # test_take and test_take_too_many passed at the base commit, so they are P2P, not F2P
+    _t, res = validated(demo_tasks["feature"])
+    assert res.fail_to_pass == ["tests/test_inventory.py::test_low_stock_items"]
+    assert res.masked_f2p == ["tests/test_inventory.py::test_take", "tests/test_inventory.py::test_take_too_many"]
+    assert set(res.masked_f2p) <= set(res.pass_to_pass)
+    assert "f2p_masked_by_import_error:2" in res.warnings
+
+
+def test_environment_incomplete_is_reported(demo_tasks):
+    import copy
+
+    t = copy.deepcopy(demo_tasks["fix"])
+    t.test_patch = ("diff --git a/tests/test_env.py b/tests/test_env.py\nnew file mode 100644\n--- /dev/null\n"
+                    "+++ b/tests/test_env.py\n@@ -0,0 +1,4 @@\n+import freezegun_not_installed\n+\n+\n"
+                    "+def test_needs_dependency():\n")
+    t.test_patch = t.test_patch.replace("@@ -0,0 +1,4 @@", "@@ -0,0 +1,5 @@") + "+    assert freezegun_not_installed\n"
+    res = validate(t, backend="local", runs=1)
+    assert res.verdict == "invalid" and res.reasons == ["environment_incomplete:freezegun_not_installed"]
+
+
 def test_grade_partial_credit_is_dense(demo_tasks):
-    t, _ = validated(demo_tasks["feature"])
+    t, _ = validated(demo_tasks["feature"], base_run=False)   # keep 3 F2P tests to exercise partial credit
     assert len(t.fail_to_pass) == 3
     base_inv = t.gold_patch  # noqa: F841 - documents what the right answer is
     wrong_order = _patch_from_edits(t, {"minishop/inventory.py": (
@@ -124,3 +146,22 @@ def test_tamper_flags_respect_source_files_under_test_dirs():
            '@@ -1 +1,2 @@\n x\n+dependencies = ["attrs"]\n')
     assert tamper_flags(toml, set())[0] == ["edits_test_config:pyproject.toml"]
     assert tamper_flags(dep, set())[0] == []
+
+
+def test_changed_test_functions_maps_hunks_to_enclosing_tests():
+    from swe_env_kit.sandbox import LocalSandbox
+    from swe_env_kit.task import Task
+    from swe_env_kit.validate import _test_name_matches, changed_test_functions
+
+    new_file = ("import hashlib\nfrom pkg import _lazy\n\n\nclass TestS:\n    def test_iter(self):\n"
+                "        x = 1\n        assert x == _lazy\n\n    def test_other(self):\n        assert True\n")
+    patch = ("diff --git a/tests/test_s.py b/tests/test_s.py\n--- a/tests/test_s.py\n+++ b/tests/test_s.py\n"
+             "@@ -1,2 +1,3 @@\n import hashlib\n+from pkg import _lazy\n \n@@ -5,3 +6,3 @@ class TestS:\n"
+             "     def test_iter(self):\n         x = 1\n-        assert x == hashlib.sha1\n+        assert x == _lazy\n")
+    t = Task(instance_id="i", repo="r", base_commit="b", test_patch=patch)
+    with LocalSandbox() as sb:
+        sb.write_file(f"{sb.workdir}/tests/test_s.py", new_file)
+        got = changed_test_functions(sb, t)
+    assert got == {"tests/test_s.py": {"test_iter"}}   # the import line has no enclosing test
+    assert _test_name_matches("tests/test_s.py::TestS::test_iter[a-b]", got["tests/test_s.py"])
+    assert not _test_name_matches("tests/test_s.py::TestS::test_other", got["tests/test_s.py"])

@@ -331,7 +331,8 @@ def _host_parse(parser_script: str, stdout: str, stderr: str) -> str:
         return out.read_text(encoding="utf-8")
 
 
-def run_tests(sb: Sandbox, task: Task, timeout: float | None = None, label: str = "tests") -> TestRun:
+def run_tests(sb: Sandbox, task: Task, timeout: float | None = None, label: str = "tests",
+              files: list[str] | None = None) -> TestRun:
     """Run the task's tests in ``sb`` and parse the result.
 
     Each run uses a fresh random directory and random start / end markers, and the script
@@ -342,7 +343,7 @@ def run_tests(sb: Sandbox, task: Task, timeout: float | None = None, label: str 
     nonce = secrets.token_hex(8)
     run_dir = f"{sb.scratch}/run-{nonce}"
     start, end = f"{START_MARK} {nonce}", f"{END_MARK} {nonce}"
-    files = task.test_files()
+    files = task.test_files() if files is None else files
     rendered = render_test_files(files, task.env.test_file_format)
     if task.env.run_script:
         sb.write_file(f"{run_dir}/run_script.sh", task.env.run_script)

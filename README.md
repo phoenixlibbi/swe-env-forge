@@ -281,7 +281,7 @@ What `validate` finds:
 
 ```
 demo__minishop-298f07aeb9b0: valid f2p=1 p2p=2                     # the rounding bug fix
-demo__minishop-fc32df4e382f: valid f2p=3 p2p=0                     # feature (without `spec`: warns naming_leak)
+demo__minishop-fc32df4e382f: valid f2p=1 p2p=2 f2p_masked_by_import_error:2   # feature; its tests import a new name
 demo__minishop-d17fd482950e: valid f2p=1 p2p=2                     # multi-file bulk discounts (the only Pro-eligible one)
 demo__minishop-0952843e2bf7: valid f2p=1 p2p=0 flaky_tests:1       # the alternating test is excluded
 ```
