@@ -25,7 +25,8 @@ def test_interface_methods_and_private_names():
              "+def test_line():\n+    assert Cart().line_total(2, 3) == 6 and Cart()._helper()\n")
     t = Task(instance_id="i", repo="r", base_commit="b", gold_patch=gold, test_patch=tests)
     items = draft_interface(t)
-    assert [(i.kind, i.name) for i in items] == [("Method", "Cart.line_total")]
+    # _helper is "private" but the tests call it, so the agent must be told about it
+    assert [(i.kind, i.name) for i in items] == [("Method", "Cart.line_total"), ("Method", "Cart._helper")]
 
 
 def test_requirements_draft_collects_assertions_and_exact_strings():

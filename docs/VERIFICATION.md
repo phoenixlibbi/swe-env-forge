@@ -67,6 +67,20 @@ These ran as agent episodes on `pytest-dev__pytest-5227`, in its official image:
 - **PR mining** (`mine --mode prs`) on `pallets/itsdangerous`, GitHub API, 150 PRs: 1 task. 93 PRs had no linked issue and 3 had no test changes. This matches the heavy filtering SWE-bench reports.
 - **Commit mining** (`mine --pro`) on the same repo: 4 Pro-eligible tasks out of 91 commits, with generated Dockerfiles.
 - **Demo repo in Docker.** Images are built from a bundle of the base history only: the image holds 1 commit and no bundle file. `validate --backend docker` reproduces the local results exactly, including the flaky-test detection.
+- **Full pipeline on a real repository** (`pallets/itsdangerous`): `mine`, then `env --build`, `validate --runs 2`, `spec`, `validate`, and finally `grade --gold --expect resolved` and `--nop --expect unresolved`.
+
+  | Candidate | Verdict |
+  |---|---|
+  | PR #378 (FIPS builds without SHA-1) | valid: F2P = the 2 `test_iter_unsigners` cases, 39 P2P; gold resolves, empty patch fails |
+  | Its commit-pair twin | identical result: both mining methods find the same fix |
+  | "Drop end-of-life Python versions" | `no_fail_to_pass`: not a behaviour change |
+  | "Update project files" | `no_fail_to_pass` |
+  | A merge commit | `environment_incomplete:freezegun`: the generated environment lacks a test dependency |
+
+  Three weaknesses surfaced here and were fixed:
+  1. **Masked F2P tests.** The new test file imports a name the fix creates (`_lazy_sha1`), so before the fix the whole file failed to import, and all 41 tests looked like fail-to-pass. An agent would have earned most of the dense reward just by defining the name. Validation now runs the tests once more at the start commit without the test patch. Tests that already passed there, and whose bodies the test patch did not change, move to P2P.
+  2. **Missing dependencies were misdiagnosed** as `no_fail_to_pass`. They are now reported as `environment_incomplete:<module>`.
+  3. **Private names.** The interface drafter skipped leading-underscore names even when the hidden tests import them, so the naming leak could not be fixed. Such names are now drafted.
 
 ## 6. Real agent trajectories
 

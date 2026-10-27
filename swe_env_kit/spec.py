@@ -86,8 +86,8 @@ def draft_interface(task: Task) -> list[InterfaceItem]:
     owners = _owners(task.gold_patch)
     items: list[InterfaceItem] = []
     for d in added_definitions(task.gold_patch):
-        if d.name not in used or d.name.startswith("_") and not d.name.startswith("__"):
-            continue
+        if d.name not in used:
+            continue  # tests that import a "private" name make it part of the tested interface
         f_is_test = any(f.path == d.path and f.is_test for f in parse_patch(task.gold_patch))
         if f_is_test:
             continue
