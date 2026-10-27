@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
 import re
 import shlex
+import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,23 +34,51 @@ def _q(s: str) -> str:
 
 
 # ---------------------------------------------------------------- repo cache
+@contextlib.contextmanager
+def _locked(path: Path):
+    """An exclusive lock shared by threads and processes (POSIX flock, thread lock elsewhere)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _THREAD_LOCKS.setdefault(str(path), threading.Lock()):
+        with open(f"{path}.lock", "w") as fh:
+            try:
+                import fcntl
+
+                fcntl.flock(fh, fcntl.LOCK_EX)
+            except ImportError:  # pragma: no cover - non-POSIX
+                pass
+            yield
+
+
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _has_commit(path: Path, commit: str) -> bool:
+    return subprocess.run(["git", "-C", str(path), "cat-file", "-e", f"{commit}^{{commit}}"],
+                          capture_output=True).returncode == 0
+
+
 def repo_cache(url: str, commit: str | None = None) -> Path:
-    """A local bare mirror of ``url`` (a URL or a local path), fetched when ``commit`` is missing."""
+    """A local bare mirror of ``url`` (a URL or a local path), fetched when ``commit`` is missing.
+
+    Safe to call from many threads or processes at once.
+    """
     key = re.sub(r"[^A-Za-z0-9_.-]+", "_", url.rstrip("/").split("://")[-1])[-80:]
     key = f"{key}-{hashlib.sha1(url.encode()).hexdigest()[:8]}.git"
     path = cache_dir() / "repos" / key
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        res = subprocess.run(["git", "clone", "-q", "--mirror", url, str(path)], capture_output=True, text=True)
-        if res.returncode != 0:
-            raise WorkspaceError(f"git clone {url} failed: {res.stderr.strip()[-500:]}")
-    if commit and subprocess.run(["git", "-C", str(path), "cat-file", "-e", f"{commit}^{{commit}}"],
-                                 capture_output=True).returncode != 0:
-        subprocess.run(["git", "-C", str(path), "fetch", "-q", "--prune", "origin", "+refs/*:refs/*"],
-                       capture_output=True)
-        if subprocess.run(["git", "-C", str(path), "cat-file", "-e", f"{commit}^{{commit}}"],
-                          capture_output=True).returncode != 0:
-            subprocess.run(["git", "-C", str(path), "fetch", "-q", "origin", commit], capture_output=True)
+    with _locked(path):
+        if not path.exists():
+            tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+            shutil.rmtree(tmp, ignore_errors=True)
+            res = subprocess.run(["git", "clone", "-q", "--mirror", url, str(tmp)], capture_output=True, text=True)
+            if res.returncode != 0:
+                shutil.rmtree(tmp, ignore_errors=True)
+                raise WorkspaceError(f"git clone {url} failed: {res.stderr.strip()[-500:]}")
+            os.replace(tmp, path)
+        if commit and not _has_commit(path, commit):
+            subprocess.run(["git", "-C", str(path), "fetch", "-q", "--prune", "origin", "+refs/*:refs/*"],
+                           capture_output=True)
+            if not _has_commit(path, commit):
+                subprocess.run(["git", "-C", str(path), "fetch", "-q", "origin", commit], capture_output=True)
     return path
 
 
