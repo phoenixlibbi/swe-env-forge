@@ -115,7 +115,9 @@ def from_generic(row: dict[str, Any]) -> Task:
     test_cmd = _first(row, ("test_command", "test_cmd", "eval_command"), None) or spec.get("test_cmd")
     if isinstance(test_cmd, list):
         test_cmd = " && ".join(test_cmd)
-    pre = [*_as_list(spec.get("pre_install")), *_as_list(spec.get("eval_commands"))]
+    # pre_install / build / eval_commands run before every test run, so patched code is rebuilt
+    # (needed by commands such as `dotnet test --no-build`)
+    pre = [*_as_list(spec.get("pre_install")), *_as_list(spec.get("build")), *_as_list(spec.get("eval_commands"))]
     parser = _first(row, ("log_parser",), None) or _SPEC_PARSERS.get(str(spec.get("log_parser_name", "")).lower(), "auto")
     env = EnvSpec(
         image=_first(row, ("image", "docker_image", "image_name"), None),

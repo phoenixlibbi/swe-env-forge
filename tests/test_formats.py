@@ -168,5 +168,5 @@ def test_generic_rows_with_swebench_style_specs():
                         " 'log_parser_name': 'cargo'}"}
     t = from_generic(row)
     assert t.env.test_command == "cargo test" and t.env.log_parser == "cargo"
-    assert t.env.pre_test == ["echo hi"] and t.env.test_file_format == "none"
+    assert t.env.pre_test == ["echo hi", "cargo build"] and t.env.test_file_format == "none"
     assert "spec_dict" not in t.metadata
