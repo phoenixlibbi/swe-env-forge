@@ -87,3 +87,19 @@ These ran as agent episodes on `pytest-dev__pytest-5227`, in its official image:
 38 real SWE-agent 1.x trajectories (private, not committed) were imported with `sweforge import-traj`. Two bugs surfaced and were fixed:
 - **Overwrites.** Several runs of the same task overwrote each other; repeated attempts are now kept as `<id>@2`, `@3`, ...
 - **Ungraded runs.** They were reported as 0% resolved; they are now listed separately and never counted as failures.
+
+## 7. Environments built from the repository's own configuration
+
+`sweforge env --detect` ran on the five `pallets/itsdangerous` candidates. Each base commit got its own era's setup:
+- **Python version:** 3.10 for the oldest commit, up to 3.13 for the newest, each taken from that commit's CI matrix.
+- **Test dependencies:** taken from `requirements/tests.txt`, tox `deps` or pyproject dependency groups.
+
+Rebuilt and re-validated, the merge commit that failed with the generic template (`environment_incomplete:freezegun`) is now **valid, with 1 F2P and 100 P2P**. That makes 3 valid tasks out of 5 candidates. The 2 rejections are correct: neither commit changes behaviour.
+
+## 8. Service sidecars
+
+`pytest -m docker tests/test_docker_live.py` (4 passed):
+- **Reachable on localhost.** Redis (`PING` → `+PONG`) and Postgres (startup handshake) answer from inside the task container, both with and without network.
+- **Offline isolation.** When the sandbox is offline, the internet is unreachable while the services still work.
+- **Clean-up.** Service containers are removed with the sandbox.
+- **Clear failures.** A service that never opens its port fails with a clear error, and nothing is left behind.
