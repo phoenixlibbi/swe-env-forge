@@ -172,3 +172,13 @@ def test_generic_rows_with_swebench_style_specs():
     baked = from_generic({**row, "dockerfile": "FROM rust\nRUN echo hi\n"})
     assert baked.env.pre_test == ["cargo build"]       # image setup already in the Dockerfile is not repeated
     assert "spec_dict" not in t.metadata
+
+
+def test_network_defaults_for_test_runs():
+    from swe_env_forge.task import EnvSpec
+
+    assert EnvSpec().test_network is False                          # mined / generic tasks run offline
+    assert to_task(SWEBENCH_ROW).env.test_network is True           # eval script re-installs the package
+    assert to_task(PRO_ROW).env.test_network is True                # Pro run scripts may npm install
+    row = {k: v for k, v in SWEBENCH_ROW.items() if k != "eval_script"}
+    assert to_task(row).env.test_network is False                   # no install step before tests

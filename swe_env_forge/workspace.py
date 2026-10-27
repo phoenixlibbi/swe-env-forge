@@ -109,13 +109,15 @@ def ensure_image(task: Task, rebuild: bool = False) -> str:
     return tag
 
 
-def open_sandbox(task: Task, backend: str = "docker", *, network: bool = True, keep: bool = False,
+def open_sandbox(task: Task, backend: str = "docker", *, network: bool | None = None, keep: bool = False,
                  memory: str | None = None) -> Sandbox:
     if backend == "local":
         if task.env.services:
             raise SandboxError(f"{task.instance_id} needs services "
                                f"({', '.join(s.get('image', '?') for s in task.env.services)}); use --backend docker")
         return LocalSandbox(env_vars=task.env.env_vars, keep=keep)
+    if network is None:
+        network = task.env.test_network
     if backend == "docker":
         image = ensure_image(task)
         return DockerSandbox(image, task.env.workdir, platform=task.env.platform, network=network,

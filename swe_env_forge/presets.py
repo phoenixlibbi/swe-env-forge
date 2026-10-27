@@ -99,9 +99,10 @@ def swebench_env(repo: str, instance_id: str, row: dict | None = None) -> EnvSpe
     parsed = parse_swebench_eval_script(row["eval_script"], row.get("base_commit", "")) if row.get("eval_script") else None
     if parsed:
         pre, cmd = parsed
+        # the official eval script re-installs the package before testing, which may fetch build deps
         return EnvSpec(image=image, platform="linux/amd64", workdir=SWEBENCH_WORKDIR, setup=list(SWEBENCH_SETUP),
                        pre_test=pre, test_command=cmd, test_file_format="none", log_parser=parser,
-                       start_ref="image-head")
+                       start_ref="image-head", test_network=any("install" in c for c in pre))
     cmd, _p, fmt = SWEBENCH_REPOS.get(repo, (_PYTEST, "pytest", "path"))
     return EnvSpec(image=image, platform="linux/amd64", workdir=SWEBENCH_WORKDIR, setup=list(SWEBENCH_SETUP),
                    test_command=cmd, test_file_format=fmt, log_parser=parser, start_ref="image-head")
@@ -124,7 +125,8 @@ def pro_env(row: dict, run_script: str | None = None, parser_script: str | None 
         files = _as_list(files)
     return EnvSpec(image=image, platform="linux/amd64", workdir=PRO_WORKDIR, test_files=list(files),
                    test_file_format="comma", log_parser="json", run_script=run_script,
-                   parser_script=parser_script, hidden_paths=["/tests/test_patch.patch"])
+                   parser_script=parser_script, hidden_paths=["/tests/test_patch.patch"],
+                   test_network=True)   # Pro run scripts may install packages (e.g. npm install) before testing
 
 
 # --------------------------------------------------------------- test-file rendering

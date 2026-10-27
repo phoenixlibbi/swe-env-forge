@@ -31,6 +31,9 @@ def _load(path: str, args) -> list:
 
     tasks = _select(load_any(path, getattr(args, "format", "auto")), getattr(args, "ids", None),
                     getattr(args, "limit", None), getattr(args, "language", None))
+    if getattr(args, "test_network", False):
+        for t in tasks:
+            t.env.test_network = True
     if getattr(args, "log_parser", None):
         for t in tasks:
             t.env.log_parser = args.log_parser
@@ -600,6 +603,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep-invalid", action="store_true")
     p.add_argument("--report")
     _add_selection(p)
+    p.add_argument("--test-network", action="store_true", help="allow network during test runs (off unless the task needs it)")
     p.set_defaults(fn=cmd_validate)
 
     p = sub.add_parser("grade", help="grade predictions (or the gold / empty patch)")
@@ -616,6 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--expect", choices=["resolved", "unresolved"],
                    help="exit 1 unless every task ends this way (CI gate for task repositories)")
     _add_selection(p)
+    p.add_argument("--test-network", action="store_true", help="allow network during test runs (off unless the task needs it)")
     p.set_defaults(fn=cmd_grade)
 
     p = sub.add_parser("run", help="run an agent on tasks with budgets, then grade")

@@ -47,6 +47,9 @@ class EnvSpec:
     # Backing services started next to the task container, sharing its network namespace so they
     # answer on localhost (as GitHub Actions services do): [{"name", "image", "env", "ports", "command"}]
     services: list[dict[str, Any]] = field(default_factory=list)
+    # Network for validation and grading runs. Off by default: a patch could otherwise download the
+    # upstream fix or send the hidden tests out, and results would depend on remote services.
+    test_network: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "EnvSpec":
