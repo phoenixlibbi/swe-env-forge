@@ -267,9 +267,23 @@ def cmd_env(args) -> int:
             plan = detect_for_task(t)
             apply_plan(t, plan)
             log(f"{t.instance_id}: {plan.base_image or 'no plan'}; " + "; ".join(plan.evidence[:6]))
-        if args.write:
+        if args.write and not args.setup:
             save_tasks(args.write, tasks)
             log(f"wrote tasks with detected environments to {args.write}")
+    if args.setup:
+        from .envagent import setup_environment, summary
+        from .task import save_tasks
+
+        client = _client(args) if (args.model or os.environ.get("SWEKIT_LLM_MODEL")) else None
+        ok = 0
+        for t in tasks:
+            _, attempts = setup_environment(t, client, max_attempts=args.max_attempts, runs=1)
+            ok += bool(attempts and attempts[-1].outcome == "valid")
+            log(f"{t.instance_id}: {summary(attempts)}")
+        if args.write:
+            save_tasks(args.write, tasks)
+        log(f"{ok}/{len(tasks)} tasks validate with their environment" + (f" -> {args.write}" if args.write else ""))
+        return 0 if ok else 1
     for t in tasks:
         if args.dockerfiles:
             out = Path(args.dockerfiles) / t.instance_id
@@ -558,11 +572,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("tasks")
     p.add_argument("--detect", action="store_true",
                    help="derive the environment from the repo's CI workflows, version files and manifests")
-    p.add_argument("--write", help="with --detect: save the tasks with their detected environments here")
+    p.add_argument("--write", help="with --detect / --setup: save the updated tasks here")
+    p.add_argument("--setup", action="store_true",
+                   help="setup agent: build, validate and (with --model) let an LLM repair the environment until it validates")
+    p.add_argument("--max-attempts", type=int, default=4)
     p.add_argument("--dockerfiles", help="write Dockerfiles under this directory")
     p.add_argument("--build", action="store_true")
     p.add_argument("--rebuild", action="store_true")
     _add_selection(p)
+    _add_llm(p)
     p.set_defaults(fn=cmd_env)
 
     p = sub.add_parser("validate", help="pre/post test runs -> FAIL_TO_PASS, PASS_TO_PASS, flaky, naming leaks")
