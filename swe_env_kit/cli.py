@@ -330,6 +330,12 @@ def cmd_grade(args) -> int:
     print(json.dumps({"graded": n, "resolved": resolved, "resolved_pct": round(100 * resolved / n, 1) if n else 0.0,
                       "mean_dense": round(sum(r["dense"] for r in results) / n, 4) if n else 0.0,
                       "missing_predictions": missing}, indent=2))
+    if args.expect:  # CI gate: e.g. --gold --expect resolved, --nop --expect unresolved
+        want = args.expect == "resolved"
+        bad = [r["instance_id"] for r in results if bool(r["resolved"]) != want or r["failure"] == "harness_error"]
+        if bad:
+            log(f"expectation '{args.expect}' failed for: {', '.join(sorted(bad))}")
+            return 1
     return 0
 
 
@@ -563,6 +569,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float)
     p.add_argument("--lenient", action="store_true",
                    help="only flag (do not fail) skip markers and test-setting edits; test files are reverted either way")
+    p.add_argument("--expect", choices=["resolved", "unresolved"],
+                   help="exit 1 unless every task ends this way (CI gate for task repositories)")
     _add_selection(p)
     p.set_defaults(fn=cmd_grade)
 

@@ -142,3 +142,10 @@ def test_spec_custom_writer_cli(pipeline, tmp_path):
     out = tmp_path / "w.jsonl"
     assert main(["spec", str(pipeline / "mined.jsonl"), "-o", str(out), "--writer", "tests.test_spec:MyWriter"]) == 0
     assert all(t.requirements == "- custom requirement" for t in load_tasks(out))
+
+
+def test_grade_expect_gate(pipeline):
+    tasks = str(pipeline / "tasks.jsonl")
+    assert main(["grade", tasks, "--gold", "--backend", "local", "--expect", "resolved", "-o", str(pipeline / "e1.jsonl")]) == 0
+    assert main(["grade", tasks, "--nop", "--backend", "local", "--expect", "unresolved", "-o", str(pipeline / "e2.jsonl")]) == 0
+    assert main(["grade", tasks, "--nop", "--backend", "local", "--expect", "resolved", "-o", str(pipeline / "e3.jsonl")]) == 1
