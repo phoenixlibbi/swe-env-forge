@@ -40,3 +40,46 @@ def test_resolved_issues():
     text = "Fixes #12, closes owner/repo#7 and resolved: #3. Mentions #99 only."
     assert resolved_issues(text) == [3, 7, 12]
     assert resolved_issues("prefix#4 fixes") == []
+
+
+def _commit(repo, files, msg, author="dev", date="2026-02-01T10:00:00+00:00"):
+    import os
+    import subprocess
+
+    for path, text in files.items():
+        p = repo / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    env = {**os.environ, "GIT_AUTHOR_NAME": author, "GIT_AUTHOR_EMAIL": f"{author}@x", "GIT_COMMITTER_NAME": author,
+           "GIT_COMMITTER_EMAIL": f"{author}@x", "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", msg], check=True, env=env)
+
+
+def test_window_merges_code_and_later_tests(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "app"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _commit(repo, {"app/core.py": "def f():\n    return 1\n", "tests/test_core.py": "def test_f():\n    pass\n"}, "init")
+    _commit(repo, {"app/core.py": "def f():\n    return 2\n"}, "change f", date="2026-02-02T09:00:00+00:00")
+    _commit(repo, {"tests/test_core.py": "from app.core import f\n\ndef test_f():\n    assert f() == 2\n"},
+            "test f", date="2026-02-02T17:00:00+00:00")
+    _commit(repo, {"README.md": "x\n"}, "docs", date="2026-02-03T09:00:00+00:00")
+    assert mine_commits(str(repo), "o/app", MineConfig()) == []          # no single commit has code + tests
+    tasks = mine_commits(str(repo), "o/app", MineConfig(window=2))
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert [m.splitlines()[0] for m in t.problem_statement.split("\n\n")] == ["change f", "test f"]
+    assert "app/core.py" in t.gold_patch and "tests/test_core.py" in t.test_patch
+    assert len(t.metadata["commits"]) == 2
+    # different authors on the same day cannot be merged with group_by=author
+    other = tmp_path / "other"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    _commit(other, {"app/core.py": "def f():\n    return 1\n", "tests/test_core.py": "def test_f():\n    pass\n"}, "init")
+    _commit(other, {"app/core.py": "def f():\n    return 2\n"}, "change f", author="alice")
+    _commit(other, {"tests/test_core.py": "def test_f():\n    assert 1\n"}, "test f", author="bob")
+    assert mine_commits(str(other), "o/x", MineConfig(window=2, group_by="author")) == []
+    assert len(mine_commits(str(other), "o/x", MineConfig(window=2))) == 1

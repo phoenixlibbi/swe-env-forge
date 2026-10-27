@@ -117,7 +117,7 @@ def cmd_mine(args) -> int:
     from .task import save_tasks
 
     base = MineConfig.pro() if args.pro else MineConfig()
-    for k in ("min_lines", "max_lines", "max_tasks", "since", "until", "max_commits"):
+    for k in ("min_lines", "max_lines", "max_tasks", "since", "until", "max_commits", "window", "group_by"):
         v = getattr(args, k)
         if v is not None:
             setattr(base, k, v)
@@ -529,6 +529,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--branch")
     p.add_argument("--max-commits", type=int)
     p.add_argument("--max-prs", type=int, default=500)
+    p.add_argument("--window", type=int, help="commits mode: merge up to N consecutive commits when one is not a task "
+                                              "by itself (e.g. code and its tests pushed separately)")
+    p.add_argument("--group-by", choices=["none", "author", "day", "author-day"],
+                   help="commits mode with --window: only merge commits by the same author and/or day")
     p.set_defaults(fn=cmd_mine)
 
     p = sub.add_parser("stats", help="task sizes, triviality, Pro-eligibility, naming leaks, licenses")

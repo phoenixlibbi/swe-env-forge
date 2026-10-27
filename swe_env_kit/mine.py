@@ -42,6 +42,11 @@ class MineConfig:
     until: str | None = None
     branch: str = "HEAD"
     max_commits: int | None = None
+    # Direct-push repositories often split one change over several commits (code today, tests
+    # tomorrow). window > 1 lets a commit that is not a task on its own merge with up to
+    # window-1 neighbouring commits; group_by limits merges to one author and/or one day.
+    window: int = 1
+    group_by: str = "none"          # none | author | day | author-day
 
     @classmethod
     def pro(cls, **kw) -> "MineConfig":
@@ -91,9 +96,24 @@ def _git(path: Path, *args: str) -> str:
     return res.stdout
 
 
+def _group_key(meta: dict[str, str], group_by: str) -> tuple:
+    parts = []
+    if "author" in group_by:
+        parts.append(meta["author"])
+    if "day" in group_by:
+        parts.append(meta["date"][:10])
+    return tuple(parts)
+
+
 def mine_commits(source: str, repo: str | None = None, cfg: MineConfig | None = None,
                  on_skip: Callable[[str, str], None] | None = None) -> list[Task]:
-    """Mine (parent, commit) pairs from a local path or clone URL, newest first."""
+    """Mine (base, instance) commit pairs from a local path or clone URL, newest first.
+
+    With ``cfg.window > 1``, a commit that is not a task by itself (for example code without
+    tests) is merged with up to ``window - 1`` earlier first-parent commits until the combined
+    diff qualifies; the task then spans base = parent of the first commit, instance = the last.
+    Each commit is used by at most one task.
+    """
     cfg = cfg or MineConfig()
     is_local = Path(source).expanduser().exists()
     path = Path(source).expanduser().resolve() if is_local else repo_cache(source)
@@ -106,27 +126,46 @@ def mine_commits(source: str, repo: str | None = None, cfg: MineConfig | None = 
     if cfg.max_commits:
         args.append(f"--max-count={cfg.max_commits}")
     args.append(cfg.branch)
+    shas = _git(path, *args).split()            # newest first
+    meta: dict[str, dict[str, str]] = {}
+    for line in _git(path, "log", "--first-parent", "--format=%H%x00%P%x00%an%x00%cI", *args[2:]).splitlines():
+        parts = line.split("\x00")
+        if len(parts) == 4:
+            meta[parts[0]] = {"parent": parts[1].split()[0] if parts[1] else "", "author": parts[2], "date": parts[3]}
+    used: set[str] = set()
     tasks: list[Task] = []
-    for sha in _git(path, *args).split():
-        parents = _git(path, "rev-list", "--parents", "-n", "1", sha).split()[1:]
-        if not parents:
+    for i, sha in enumerate(shas):
+        if sha in used or not meta.get(sha, {}).get("parent"):
             continue
-        base = parents[0]
-        diff = _git(path, "diff", "--no-color", "--no-ext-diff", "-M", base, sha)
-        gold, tests = split_patch(diff)
-        ok, why = keep(gold, tests, cfg)
+        span = [sha]
+        why = ""
+        for k in range(max(1, cfg.window)):
+            first = span[-1]
+            base = meta[first]["parent"]
+            diff = _git(path, "diff", "--no-color", "--no-ext-diff", "-M", base, sha)
+            gold, tests = split_patch(diff)
+            ok, why = keep(gold, tests, cfg)
+            if ok or why in ("too_large", "too_many_files"):
+                break
+            nxt = i + k + 1                     # the next older first-parent commit
+            if nxt >= len(shas) or shas[nxt] in used or not meta.get(shas[nxt], {}).get("parent"):
+                break
+            if cfg.group_by != "none" and _group_key(meta[shas[nxt]], cfg.group_by) != _group_key(meta[sha], cfg.group_by):
+                break
+            span.append(shas[nxt])
         if not ok:
             if on_skip:
                 on_skip(sha, why)
             continue
-        message = _git(path, "log", "-1", "--format=%B", sha).strip()
-        date = _git(path, "log", "-1", "--format=%cI", sha).strip()
+        used.update(span)
+        messages = [_git(path, "log", "-1", "--format=%B", c).strip() for c in reversed(span)]
         language = detect_language(files_in(gold) + files_in(tests))
         tasks.append(Task(
-            instance_id=f"{_slug(repo)}-{sha[:12]}", repo=repo, base_commit=base, problem_statement=message,
-            gold_patch=gold, test_patch=tests, language=language, source="mined-commits", created_at=date,
+            instance_id=f"{_slug(repo)}-{sha[:12]}", repo=repo, base_commit=base,
+            problem_statement="\n\n".join(messages), gold_patch=gold, test_patch=tests, language=language,
+            source="mined-commits", created_at=meta[sha]["date"],
             repo_url=str(path) if is_local else source, env=default_env(language),
-            metadata={"instance_commit": sha, "needs_augmentation": True},
+            metadata={"instance_commit": sha, "commits": list(reversed(span)), "needs_augmentation": True},
         ))
         if cfg.max_tasks and len(tasks) >= cfg.max_tasks:
             break
