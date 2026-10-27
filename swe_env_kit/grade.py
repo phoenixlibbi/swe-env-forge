@@ -79,7 +79,8 @@ def tamper_flags(patch: str, test_patch_files: set[str], source_files: set[str] 
         test_dir = f.is_test and not (paths & set(source_files))
         if hidden or test_file or infra or test_dir:
             revert.extend(sorted(paths))
-            kind = ("edits_hidden_test_file" if hidden else "edits_test_config" if infra
+            # reverted, so informational; only unreverted test-setting edits below fail strict grading
+            kind = ("edits_hidden_test_file" if hidden else "edits_test_runner_config" if infra
                     else "deletes_test_file" if f.deleted else "edits_test_file")
             flags.append(f"{kind}:{f.path}")
             continue
@@ -169,13 +170,15 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
     r.test_log_tail = run.log[-6000:]
     if run.timed_out:
         r.flags.append("tests_timed_out")
+    tampered = strict and any(f.split(":")[0] in STRICT_FLAGS for f in r.flags)
     if not run.parsed:
-        r.failure = r.failure or "tests_not_run"  # e.g. compile errors; keep "empty_patch" when it applies
+        # e.g. compile errors, or a config edit that stops the runner; keep "empty_patch" when it applies
+        r.failure = "tampering" if tampered else (r.failure or "tests_not_run")
         return r
     s = score(task, run.statuses)
     for k, v in s.items():
         setattr(r, k, v)
-    if strict and any(f.split(":")[0] in STRICT_FLAGS for f in r.flags):
+    if tampered:
         r.resolved, r.dense = False, 0.0
         r.failure = "tampering"
     if not r.resolved and not r.failure:

@@ -110,7 +110,7 @@ def test_strict_mode_and_flags():
     assert revert == ["tests/test_b.py", "conftest.py"]
     assert "adds_skip_marker:src/a.py" in flags
     assert "deletes_test_file:tests/test_b.py" in flags
-    assert "edits_test_config:conftest.py" in flags
+    assert "edits_test_runner_config:conftest.py" in flags
 
 
 def test_tamper_flags_respect_source_files_under_test_dirs():

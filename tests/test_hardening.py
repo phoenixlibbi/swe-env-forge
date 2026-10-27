@@ -155,3 +155,17 @@ def test_space_in_sandbox_path(fix_task, tmp_path):
     with LocalSandbox(root=str(tmp_path / "with space")) as sb:
         checkout_base(sb, fix_task)
         assert run_tests(sb, fix_task).parsed
+
+
+def test_config_edit_that_stops_the_runner_is_tampering(fix_task):
+    # a broken test-setting edit in a shared build file must not hide behind "tests_not_run"
+    toml = ('[project]\nname = "minishop"\nversion = "0.1.0"\n\n[tool.pytest.ini_options]\n'
+            'testpaths = ["tests"]\naddopts = "-p plugin_that_does_not_exist"\n')
+    r = grade(fix_task, patch_from(fix_task, {"pyproject.toml": toml}), backend="local")
+    assert r.failure == "tampering" and "edits_test_config:pyproject.toml" in r.flags
+
+
+def test_reverted_conftest_is_informational(fix_task):
+    p = fix_task.gold_patch + patch_from(fix_task, {"conftest.py": "# my debugging helpers\n"})
+    r = grade(fix_task, p, backend="local")
+    assert r.resolved and "edits_test_runner_config:conftest.py" in r.flags
