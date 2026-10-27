@@ -206,6 +206,7 @@ def parse_go(log: str) -> dict[str, str]:
     """``go test -json`` events, falling back to ``go test -v`` text (``--- PASS: TestX``)."""
     out: dict[str, str] = {}
     action = {"pass": PASSED, "fail": FAILED, "skip": SKIPPED}
+    per_pkg: dict[tuple[str, str], str] = {}
     for line in log.split("\n"):
         line = line.strip()
         if line.startswith("{") and '"Action"' in line:
@@ -214,8 +215,13 @@ def parse_go(log: str) -> dict[str, str]:
             except json.JSONDecodeError:
                 continue
             if ev.get("Test") and ev.get("Action") in action:
-                out[ev["Test"]] = action[ev["Action"]]
-    if out:
+                per_pkg[(ev.get("Package", ""), ev["Test"])] = action[ev["Action"]]
+    if per_pkg:
+        # names are test names (as in SWE-bench Pro); the same name in two packages keeps the worst result
+        rank = {FAILED: 2, SKIPPED: 1, PASSED: 0}
+        for (_pkg, test), st in per_pkg.items():
+            if test not in out or rank[st] > rank[out[test]]:
+                out[test] = st
         return out
     rx = re.compile(r"^\s*--- (PASS|FAIL|SKIP): (\S+)")
     for line in strip_ansi(log).split("\n"):
@@ -307,7 +313,7 @@ def parse_tap(log: str) -> dict[str, str]:
 def parse_cargo(log: str) -> dict[str, str]:
     """``cargo test`` lines: ``test module::name ... ok | FAILED | ignored``."""
     out: dict[str, str] = {}
-    rx = re.compile(r"^test (\S+)(?: - .*?)? \.\.\. (ok|FAILED|ignored|bench)")
+    rx = re.compile(r"^test (\S+(?: - .*?)?) \.\.\. (ok|FAILED|ignored|bench)")
     for line in strip_ansi(log).split("\n"):
         m = rx.match(line.strip())
         if m:
@@ -324,7 +330,7 @@ def parse_cargo_short(log: str) -> dict[str, str]:
 # ------------------------------------------------------------ xml: junit / trx
 def _xml_docs(log: str) -> list[ET.Element]:
     docs = []
-    for m in re.finditer(r"<(testsuites|testsuite|TestRun)\b.*?</\1>", log, re.S):
+    for m in re.finditer(r"<(testsuites|testsuite|TestRun)\b(?:[^>]*/>|.*?</\1>)", log, re.S):
         try:
             docs.append(ET.fromstring(m.group(0)))
         except ET.ParseError:

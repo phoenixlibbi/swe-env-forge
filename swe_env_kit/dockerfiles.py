@@ -39,8 +39,9 @@ def generate_dockerfile(task: Task, from_bundle: bool | None = None) -> str:
     if local:
         lines.append("COPY repo.bundle /tmp/repo.bundle")
     lines += [
-        f"RUN git clone -q {shlex.quote(source)} {WORKDIR} && cd {WORKDIR} && "
-        f"git -c advice.detachedHead=false checkout -q {shlex.quote(task.base_commit)}",
+        f"RUN git clone -q {shlex.quote(source)} {WORKDIR} 2>/dev/null; cd {WORKDIR} && "
+        f"git -c advice.detachedHead=false checkout -q {shlex.quote(task.base_commit)}"
+        + (" && rm -f /tmp/repo.bundle" if local else ""),
         f"WORKDIR {WORKDIR}",
         *[f"RUN {cmd}" for cmd in tpl["install"]],
     ]
@@ -52,9 +53,18 @@ def build_default_image(task: Task, tag: str) -> str:
     dockerfile = generate_dockerfile(task)
     with tempfile.TemporaryDirectory(prefix="swekit-ctx-") as ctx:
         if _is_local(task.clone_url):
-            src = task.clone_url.removeprefix("file://")
-            res = subprocess.run(["git", "-C", src, "bundle", "create", str(Path(ctx) / "repo.bundle"), "--all"],
-                                 capture_output=True, text=True)
+            # Bundle only the base commit's history: a bundle of --all would ship the fix.
+            from .workspace import _locked, repo_cache
+
+            mirror = repo_cache(task.clone_url, task.base_commit)
+            ref = f"refs/heads/swekit-base-{task.base_commit[:12]}"
+            with _locked(mirror):
+                subprocess.run(["git", "-C", str(mirror), "update-ref", ref, task.base_commit], check=True)
+                try:
+                    res = subprocess.run(["git", "-C", str(mirror), "bundle", "create", "-q",
+                                          str(Path(ctx) / "repo.bundle"), ref], capture_output=True, text=True)
+                finally:
+                    subprocess.run(["git", "-C", str(mirror), "update-ref", "-d", ref], capture_output=True)
             if res.returncode != 0:
                 raise RuntimeError(f"git bundle failed: {res.stderr.strip()[-300:]}")
         return docker_build(dockerfile, tag, task.env.platform, context=ctx)

@@ -31,7 +31,7 @@ EXPECTED = {
     "jest_verbose.log": ("jest", {"totals": "PASSED", "discounts": "FAILED", "later": "SKIPPED"}),
     "mocha.log": ("mocha", {"Cart totals": "PASSED", "Cart discounts": "FAILED", "Cart later": "SKIPPED"}),
     "cargo.log": ("cargo", {"cart::tests::totals": "PASSED", "cart::tests::discounts": "FAILED",
-                            "cart::tests::slow": "SKIPPED", "src/lib.rs": "PASSED"}),
+                            "cart::tests::slow": "SKIPPED", "src/lib.rs - cart::Cart::total (line 10)": "PASSED"}),
     "junit.log": ("junit", {"com.x.CartTest.totals": "PASSED", "com.x.CartTest.discounts": "FAILED",
                             "com.x.CartTest.slow": "SKIPPED", "com.x.CartTest.db": "ERROR"}),
     "trx.log": ("trx", {"Shop.Tests.CartTests.Totals": "PASSED", "Shop.Tests.CartTests.Discounts": "FAILED",
@@ -59,9 +59,21 @@ def test_auto_finds_the_same_results(fname):
     assert parse_log(load(fname), "auto") == expected
 
 
-def test_cargo_doctest_name_is_kept_whole_enough():
-    # doctest lines are "test src/lib.rs - cart::Cart::total (line 10) ... ok"
-    assert parse_log(load("cargo.log"), "cargo")["src/lib.rs"] == "PASSED"
+def test_cargo_doctests_are_not_merged():
+    log = "test src/lib.rs - parse (line 12) ... FAILED\ntest src/lib.rs - render (line 40) ... ok\n"
+    assert parse_log(log, "cargo") == {"src/lib.rs - parse (line 12)": "FAILED", "src/lib.rs - render (line 40)": "PASSED"}
+
+
+def test_go_same_test_name_in_two_packages_keeps_the_failure():
+    log = ('{"Action":"fail","Package":"x/a","Test":"TestParse"}\n'
+           '{"Action":"pass","Package":"x/b","Test":"TestParse"}\n')
+    assert parse_log(log, "go") == {"TestParse": "FAILED"}
+
+
+def test_junit_self_closing_suite_does_not_hide_the_next_one():
+    log = ('<?xml version="1.0"?>\n<testsuite name="empty" tests="0"/>\n<?xml version="1.0"?>\n'
+           '<testsuite name="s"><testcase classname="C" name="t"><failure/></testcase></testsuite>\n')
+    assert parse_log(log, "junit") == {"C.t": "FAILED"}
 
 
 def test_pytest_v2_handles_colour_and_trailing_status():

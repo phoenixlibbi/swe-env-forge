@@ -116,11 +116,16 @@ class DockerSandbox(Sandbox):
                *([] if network else ["--network", "none"]),
                *(["--memory", memory] if memory else []), *(["--cpus", cpus] if cpus else []),
                image, "-f", "/dev/null"]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if res.returncode != 0:
-            raise SandboxError(f"docker run {image} failed: {res.stderr.strip()[-500:]}")
         self._closed = False
-        probe = self._raw(["sh", "-c", f"mkdir -p {self.scratch}; command -v bash; command -v timeout"], 60)
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if res.returncode != 0:
+                raise SandboxError(f"docker run {image} failed: {res.stderr.strip()[-500:]}")
+            probe = self._raw(["sh", "-c", f"mkdir -p {self.scratch}; command -v bash; command -v timeout"], 120)
+        except BaseException:
+            subprocess.run(["docker", "rm", "-f", self.name], capture_output=True, timeout=120)
+            self._closed = True
+            raise
         self.shell = "bash" if "bash" in probe.output else "sh"
         self.has_timeout = "timeout" in probe.output.replace("bash", "")
 

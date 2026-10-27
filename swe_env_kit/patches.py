@@ -44,10 +44,28 @@ class FilePatch:
         return is_test_path(self.path) or (self.renamed and is_test_path(self.old_path))
 
 
+_ESCAPES = {"n": b"\n", "t": b"\t", '"': b'"', "\\": b"\\", "a": b"\a", "b": b"\b", "f": b"\f", "r": b"\r", "v": b"\v"}
+
+
 def _unquote(p: str) -> str:
-    if len(p) >= 2 and p[0] == p[-1] == '"':
-        p = p[1:-1].encode("latin-1", "backslashreplace").decode("unicode_escape").encode("latin-1").decode("utf-8", "replace")
-    return p
+    """Undo git's C-style path quoting (``"t\\303\\251st.py"`` -> ``tést.py``), byte-wise."""
+    if not (len(p) >= 2 and p[0] == p[-1] == '"'):
+        return p
+    body, out, i = p[1:-1], bytearray(), 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\" and i + 1 < len(body):
+            nxt = body[i + 1]
+            if nxt in "01234567" and re.match(r"[0-7]{3}", body[i + 1:i + 4]):
+                out.append(int(body[i + 1:i + 4], 8))
+                i += 4
+                continue
+            out += _ESCAPES.get(nxt, nxt.encode("utf-8"))
+            i += 2
+            continue
+        out += c.encode("utf-8")
+        i += 1
+    return out.decode("utf-8", "replace")
 
 
 def _strip_prefix(p: str) -> str:
@@ -66,8 +84,11 @@ def _split_chunks(text: str) -> list[list[str]]:
     i = 0
     while i < len(lines):
         ln = lines[i]
+        # without git headers a file starts with ---/+++ followed by a hunk header; requiring the
+        # @@ line stops "-- x" / "++ y" content lines inside a hunk from looking like a new file
         starts = ln.startswith("diff --git ") if has_git_headers else (
-            ln.startswith("--- ") and i + 1 < len(lines) and lines[i + 1].startswith("+++ "))
+            ln.startswith("--- ") and i + 2 < len(lines) and lines[i + 1].startswith("+++ ")
+            and lines[i + 2].startswith("@@"))
         if starts:
             current = [ln]
             chunks.append(current)
@@ -104,9 +125,9 @@ def parse_patch(text: str | None) -> list[FilePatch]:
                 elif ln.startswith("deleted file mode"):
                     fp.deleted = True
                 elif ln.startswith("rename from "):
-                    fp.renamed, old_path = True, ln[len("rename from "):]
+                    fp.renamed, old_path = True, _unquote(ln[len("rename from "):])
                 elif ln.startswith("rename to "):
-                    fp.renamed, new_path = True, ln[len("rename to "):]
+                    fp.renamed, new_path = True, _unquote(ln[len("rename to "):])
                 elif ln.startswith("Binary files ") or ln.startswith("GIT binary patch"):
                     fp.binary = True
             hm = _HUNK.match(ln)
