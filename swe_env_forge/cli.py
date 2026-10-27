@@ -1,4 +1,4 @@
-"""``swekit``: the command-line interface."""
+"""``sweforge``: the command-line interface."""
 
 from __future__ import annotations
 
@@ -53,17 +53,17 @@ def _client(args):
 
 
 def _add_selection(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--format", default="auto", help="input format: auto, swekit, swebench, swebench-pro, generic")
+    p.add_argument("--format", default="auto", help="input format: auto, sweforge, swebench, swebench-pro, generic")
     p.add_argument("--ids", help="comma-separated instance ids to keep")
     p.add_argument("--limit", type=int, help="keep the first N tasks")
     p.add_argument("--language", help="keep tasks of one language")
-    p.add_argument("--log-parser", help="override every task's log parser (see swe_env_kit.logparsers)")
+    p.add_argument("--log-parser", help="override every task's log parser (see swe_env_forge.logparsers)")
 
 
 def _add_llm(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--model", help="model name (or SWEKIT_LLM_MODEL)")
-    p.add_argument("--base-url", help="OpenAI-compatible base URL (or SWEKIT_LLM_BASE_URL)")
-    p.add_argument("--api-key-env", help="environment variable holding the API key (default SWEKIT_LLM_API_KEY / OPENAI_API_KEY)")
+    p.add_argument("--model", help="model name (or SWEFORGE_LLM_MODEL)")
+    p.add_argument("--base-url", help="OpenAI-compatible base URL (or SWEFORGE_LLM_BASE_URL)")
+    p.add_argument("--api-key-env", help="environment variable holding the API key (default SWEFORGE_LLM_API_KEY / OPENAI_API_KEY)")
     p.add_argument("--input-price", type=float, default=0.0, help="USD per million prompt tokens (for cost budgets)")
     p.add_argument("--output-price", type=float, default=0.0, help="USD per million completion tokens")
 
@@ -74,7 +74,7 @@ def cmd_demo(args) -> int:
 
     shas = build_demo_repo(args.dir)
     log(f"demo repository with {len(shas)} commits at {args.dir}")
-    print(f"next: swekit mine {args.dir} -o demo-tasks.jsonl")
+    print(f"next: sweforge mine {args.dir} -o demo-tasks.jsonl")
     return 0
 
 
@@ -135,7 +135,7 @@ def cmd_mine(args) -> int:
     save_tasks(args.output, tasks)
     log(f"mined {len(tasks)} candidate tasks -> {args.output}; skipped: {skipped or 'none'}")
     if tasks:
-        log(f"next: swekit validate {args.output} -o validated.jsonl --backend docker")
+        log(f"next: sweforge validate {args.output} -o validated.jsonl --backend docker")
     return 0
 
 
@@ -205,7 +205,7 @@ def cmd_spec(args) -> int:
     leaks = sum(1 for t in tasks if t.metadata.get("spec", {}).get("leak"))
     who = getattr(writer, "name", "deterministic drafts") if writer else "deterministic drafts"
     log(f"wrote specs for {len(tasks)} tasks with {who} -> {args.output}; {leaks} flagged for leaks.")
-    log(f"human review: swekit spec-export {args.output} review/  (edit)  swekit spec-import {args.output} review/ -o final.jsonl")
+    log(f"human review: sweforge spec-export {args.output} review/  (edit)  sweforge spec-import {args.output} review/ -o final.jsonl")
     return 0
 
 
@@ -218,7 +218,7 @@ def cmd_spec_export(args) -> int:
     for t in tasks:
         (out / f"{t.instance_id}.md").write_text(export_review_file(t), encoding="utf-8")
     log(f"wrote {len(tasks)} review files to {out}. Edit the fields, set 'status: reviewed' and your name, "
-        f"then run: swekit spec-import {args.tasks} {out} -o reviewed.jsonl")
+        f"then run: sweforge spec-import {args.tasks} {out} -o reviewed.jsonl")
     return 0
 
 
@@ -274,7 +274,7 @@ def cmd_env(args) -> int:
         from .envagent import setup_environment, summary
         from .task import save_tasks
 
-        client = _client(args) if (args.model or os.environ.get("SWEKIT_LLM_MODEL")) else None
+        client = _client(args) if (args.model or os.environ.get("SWEFORGE_LLM_MODEL")) else None
         ok = 0
         for t in tasks:
             _, attempts = setup_environment(t, client, max_attempts=args.max_attempts, runs=1)
@@ -392,7 +392,7 @@ def _agent_factory(args) -> tuple[Callable, str]:
         def llm(t):
             return LLMAgent(t, _client(client_args), mode=client_args.agent_mode,
                             keep_observations=client_args.keep_observations)
-        return llm, f"llm:{args.model or os.environ.get('SWEKIT_LLM_MODEL', '')}"
+        return llm, f"llm:{args.model or os.environ.get('SWEFORGE_LLM_MODEL', '')}"
     cls = load_agent_class(spec)
     return (lambda t: cls(t)), spec
 
@@ -415,7 +415,7 @@ def cmd_run(args) -> int:
         g = ep.grade or {}
         log(f"{ep.instance_id}: {ep.exit_reason} turns={ep.turns} cost=${ep.cost:.4f} "
             f"{'RESOLVED' if g.get('resolved') else g.get('failure', 'ungraded')}")
-    log(f"{len(eps)} episodes -> {args.output} (report: swekit report {args.output} --tasks {args.tasks})")
+    log(f"{len(eps)} episodes -> {args.output} (report: sweforge report {args.output} --tasks {args.tasks})")
     return 0
 
 
@@ -489,8 +489,8 @@ def cmd_localize(args) -> int:
 
 # --------------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="swekit", description="From git history to RL reward for SWE-bench-style tasks.")
-    ap.add_argument("--version", action="version", version=f"swe-env-kit {__version__}")
+    ap = argparse.ArgumentParser(prog="sweforge", description="From git history to RL reward for SWE-bench-style tasks.")
+    ap.add_argument("--version", action="version", version=f"swe-env-forge {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("demo", help="build the original demo repository")
@@ -511,7 +511,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("convert", help="convert tasks between formats")
     p.add_argument("input")
     p.add_argument("-o", "--output", required=True)
-    p.add_argument("--to", default="swekit", choices=["swekit", "swebench", "swebench-pro"])
+    p.add_argument("--to", default="sweforge", choices=["sweforge", "swebench", "swebench-pro"])
     _add_selection(p)
     p.set_defaults(fn=cmd_convert)
 
@@ -679,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except (FileNotFoundError, ValueError) as exc:
-        log(f"swekit {args.command}: {exc}")
+        log(f"sweforge {args.command}: {exc}")
         return 1
 
 

@@ -1,6 +1,6 @@
 """A small, original demo repository ("minishop") with a realistic commit history.
 
-``swekit demo DIR`` builds it so every stage can be tried end to end without Docker
+``sweforge demo DIR`` builds it so every stage can be tried end to end without Docker
 or network access. The history contains:
 
 1. the initial package and tests
@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 
 FILES_V1 = {
-    "README.md": "# minishop\n\nA tiny shop library used to demo swe-env-kit.\n",
+    "README.md": "# minishop\n\nA tiny shop library used to demo swe-env-forge.\n",
     "pyproject.toml": '[project]\nname = "minishop"\nversion = "0.1.0"\n\n[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
     "minishop/__init__.py": "",
     "minishop/pricing.py": '''"""Prices are stored in cents."""

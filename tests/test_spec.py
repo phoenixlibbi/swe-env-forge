@@ -1,10 +1,10 @@
 import copy
 import json
 
-from swe_env_kit.llm import ChatClient, LLMError
-from swe_env_kit.spec import augment, draft_interface, draft_requirements, leak_check
-from swe_env_kit.task import Task
-from swe_env_kit.validate import validate
+from swe_env_forge.llm import ChatClient, LLMError
+from swe_env_forge.spec import augment, draft_interface, draft_requirements, leak_check
+from swe_env_forge.task import Task
+from swe_env_forge.validate import validate
 
 
 def test_interface_for_new_function(demo_tasks):
@@ -129,7 +129,7 @@ def test_chat_client_against_local_stub():
 # ------------------------------------------------------------ authoring modes
 import json as _json
 
-from swe_env_kit.spec import LLMWriter, export_review_file, import_review_file
+from swe_env_forge.spec import LLMWriter, export_review_file, import_review_file
 
 
 class JSONClient:

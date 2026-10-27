@@ -3,13 +3,13 @@ import json
 
 import pytest
 
-from swe_env_kit.agents import LLMAgent
-from swe_env_kit.gym import SWEEnv, run_episode
-from swe_env_kit.llm import Usage
-from swe_env_kit.sandbox import LocalSandbox
-from swe_env_kit.tools import TOOL_SCHEMAS, Toolkit, action_from_tool_call
-from swe_env_kit.validate import apply_validation, validate
-from swe_env_kit.workspace import checkout_base
+from swe_env_forge.agents import LLMAgent
+from swe_env_forge.gym import SWEEnv, run_episode
+from swe_env_forge.llm import Usage
+from swe_env_forge.sandbox import LocalSandbox
+from swe_env_forge.tools import TOOL_SCHEMAS, Toolkit, action_from_tool_call
+from swe_env_forge.validate import apply_validation, validate
+from swe_env_forge.workspace import checkout_base
 
 
 @pytest.fixture()

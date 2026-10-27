@@ -88,7 +88,7 @@ def docker_pull(image: str, platform: str | None = None, timeout: float = 3600) 
 def docker_build(dockerfile: str, tag: str, platform: str | None = None, context: str | None = None,
                  timeout: float = 7200) -> str:
     """Build ``dockerfile`` (text) as ``tag``; returns the build log."""
-    with tempfile.TemporaryDirectory(prefix="swekit-build-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="sweforge-build-") as tmp:
         ctx = context or tmp
         df = Path(tmp) / "Dockerfile"
         df.write_text(dockerfile, encoding="utf-8")
@@ -123,9 +123,9 @@ class DockerSandbox(Sandbox):
                  cpus: str | None = None, keep: bool = False, pull: bool = True,
                  services: list[dict] | None = None, service_timeout: float = 180):
         self.image, self.workdir, self.keep = image, workdir, keep
-        self.scratch = "/tmp/swekit"
+        self.scratch = "/tmp/sweforge"
         self.env_vars = dict(env_vars or {})
-        self.name = f"swekit-{uuid.uuid4().hex[:12]}"
+        self.name = f"sweforge-{uuid.uuid4().hex[:12]}"
         if pull:
             docker_pull(image, platform)
         cmd = ["docker", "run", "-d", "--name", self.name, "--entrypoint", "tail",
@@ -237,7 +237,7 @@ class LocalSandbox(Sandbox):
     """
 
     def __init__(self, root: str | None = None, env_vars: dict[str, str] | None = None, keep: bool = False):
-        self.root = Path(root or tempfile.mkdtemp(prefix="swekit-local-")).resolve()
+        self.root = Path(root or tempfile.mkdtemp(prefix="sweforge-local-")).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.workdir = str(self.root / "repo")
         self.scratch = str(self.root / "scratch")

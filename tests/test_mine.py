@@ -1,4 +1,4 @@
-from swe_env_kit.mine import MineConfig, keep, mine_commits, resolved_issues
+from swe_env_forge.mine import MineConfig, keep, mine_commits, resolved_issues
 
 
 def test_mine_commits_finds_the_four_tasks(demo_repo, demo_tasks):

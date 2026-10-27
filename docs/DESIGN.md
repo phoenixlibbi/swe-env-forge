@@ -1,6 +1,6 @@
-# swe-env-kit design
+# swe-env-forge design
 
-`swe-env-kit` covers the full life of a SWE-bench-style task, from git history to an RL reward:
+`swe-env-forge` covers the full life of a SWE-bench-style task, from git history to an RL reward:
 
 ```
             mine ──► env ──► validate ──► spec ──► run ──► grade ──► report
@@ -21,7 +21,7 @@ It reads and writes SWE-bench and SWE-bench Pro data, so it works with datasets 
 
 ## Design principles
 
-1. **One task schema** (`swe_env_kit.task.Task`). Everything converts *into* it and can be exported *out* of it.
+1. **One task schema** (`swe_env_forge.task.Task`). Everything converts *into* it and can be exported *out* of it.
 2. **The environment is data.** A task carries everything needed to run its tests in its `env` section:
    - the image or Dockerfile,
    - the workdir and setup commands,

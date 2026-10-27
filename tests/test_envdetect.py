@@ -3,10 +3,10 @@ import subprocess
 
 import pytest
 
-from swe_env_kit.envdetect import (RepoView, apply_plan, detect, dockerfile_for, pick_python,
+from swe_env_forge.envdetect import (RepoView, apply_plan, detect, dockerfile_for, pick_python,
                                    _python_from_requires)
-from swe_env_kit.task import Task
-from swe_env_kit.yamlite import _Parser, loads
+from swe_env_forge.task import Task
+from swe_env_forge.yamlite import _Parser, loads
 
 WORKFLOW = """
 name: Tests
@@ -140,8 +140,8 @@ def test_apply_plan_writes_dockerfile_and_env(tmp_path):
 
 
 def test_local_backend_refuses_tasks_with_services():
-    from swe_env_kit.sandbox import SandboxError
-    from swe_env_kit.workspace import open_sandbox
+    from swe_env_forge.sandbox import SandboxError
+    from swe_env_forge.workspace import open_sandbox
 
     t = Task.from_dict({"instance_id": "i", "repo": "o/r", "base_commit": "b",
                         "env": {"services": [{"name": "db", "image": "postgres:16", "ports": [5432]}]}})

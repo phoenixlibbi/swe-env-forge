@@ -199,7 +199,7 @@ def append_jsonl(path: str | Path, row: dict[str, Any]) -> None:
 
 
 def load_tasks(path: str | Path) -> list[Task]:
-    """Load tasks in swe-env-kit format (use ``formats.load_any`` for other formats)."""
+    """Load tasks in swe-env-forge format (use ``formats.load_any`` for other formats)."""
     return [Task.from_dict(row) for row in read_jsonl(path)]
 
 

@@ -1,6 +1,6 @@
 import pytest
 
-from swe_env_kit.languages import (adds_skip_marker, definitions_in_line, detect_language, is_test_path,
+from swe_env_forge.languages import (adds_skip_marker, definitions_in_line, detect_language, is_test_path,
                                    language_of, missing_symbols)
 
 

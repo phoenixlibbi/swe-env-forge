@@ -1,5 +1,5 @@
-from swe_env_kit.stats import license_class, summarize, task_stats
-from swe_env_kit.task import Task
+from swe_env_forge.stats import license_class, summarize, task_stats
+from swe_env_forge.task import Task
 
 GOLD = """\
 diff --git a/shop/cart.py b/shop/cart.py

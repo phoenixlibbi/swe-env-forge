@@ -1,4 +1,4 @@
-"""Convert between swe-env-kit tasks and SWE-bench / SWE-bench Pro / generic rows."""
+"""Convert between swe-env-forge tasks and SWE-bench / SWE-bench Pro / generic rows."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from .languages import detect_language
 from .patches import files_in
 from .task import EnvSpec, Task, _as_list, read_jsonl
 
-FORMATS = ("auto", "swekit", "swebench", "swebench-pro", "generic")
+FORMATS = ("auto", "sweforge", "swebench", "swebench-pro", "generic")
 
 
 def detect_format(row: dict[str, Any]) -> str:
     if isinstance(row.get("env"), dict) and "gold_patch" in row:
-        return "swekit"
+        return "sweforge"
     if "requirements" in row and "interface" in row and ("fail_to_pass" in row or "repo_language" in row):
         return "swebench-pro"
     if "patch" in row and "FAIL_TO_PASS" in row:
@@ -144,7 +144,7 @@ def from_generic(row: dict[str, Any]) -> Task:
 
 def to_task(row: dict[str, Any], fmt: str = "auto") -> Task:
     fmt = detect_format(row) if fmt == "auto" else fmt
-    if fmt == "swekit":
+    if fmt == "sweforge":
         return Task.from_dict(row)
     if fmt == "swebench":
         return from_swebench(row)
@@ -184,7 +184,7 @@ def to_pro(task: Task) -> dict[str, Any]:
     }
 
 
-EXPORTERS = {"swekit": Task.to_dict, "swebench": to_swebench, "swebench-pro": to_pro}
+EXPORTERS = {"sweforge": Task.to_dict, "swebench": to_swebench, "swebench-pro": to_pro}
 
 
 # ----------------------------------------------------------------- predictions

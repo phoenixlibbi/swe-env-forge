@@ -30,7 +30,7 @@ For each repository in SWE-bench Lite, one task was graded with the reference pa
 
 ## 2. Test lists match the official datasets
 
-`swekit validate` re-derives FAIL_TO_PASS / PASS_TO_PASS by running the tests before and after the fix:
+`sweforge validate` re-derives FAIL_TO_PASS / PASS_TO_PASS by running the tests before and after the fix:
 
 | Task | Ours vs dataset |
 |---|---|
@@ -41,13 +41,13 @@ For each repository in SWE-bench Lite, one task was graded with the reference pa
 
 ## 3. Predictions run through the official SWE-bench harness
 
-The predictions file written by `swekit run` (oracle agent, django-11099 and pytest-5227) was evaluated by the official `swebench` package (v5.0.2, `python -m swebench.harness.run_evaluation`). Result: **2 submitted, 2 completed, 2 resolved, 0 errors**.
+The predictions file written by `sweforge run` (oracle agent, django-11099 and pytest-5227) was evaluated by the official `swebench` package (v5.0.2, `python -m swebench.harness.run_evaluation`). Result: **2 submitted, 2 completed, 2 resolved, 0 errors**.
 
-### The official harness accepts a fake fix that swekit rejects
+### The official harness accepts a fake fix that sweforge rejects
 
 The same harness was given attack patches for `pytest-dev__pytest-5227`. None of them fixes the bug:
 
-| Attack patch | Official SWE-bench harness | swekit |
+| Attack patch | Official SWE-bench harness | sweforge |
 |---|---|---|
 | Adds `conftest.py` files whose pytest hook marks every test as passed | **resolved** | not resolved: the conftest files are reverted and flagged |
 | Overwrites the hidden test file with an empty test | unresolved | not resolved: the file is reverted and flagged |
@@ -60,7 +60,7 @@ The official harness restores the hidden test files but not test-runner configur
 These ran as agent episodes on `pytest-dev__pytest-5227`, in its official image:
 - **Network.** `urllib` to pypi.org and `git fetch` from GitHub both fail: DNS is off. Agents are offline by default.
 - **History.** `git log --all` shows 10,159 commits, all ancestors of the start. `git fsck --unreachable` and `git reflog` show nothing, and the stash is empty.
-- **Scratch files.** `/tmp/swekit` holds only the agent's own `cwd` and `step.sh` files. The per-run test scripts and markers are created only at grading time, in a fresh container.
+- **Scratch files.** `/tmp/sweforge` holds only the agent's own `cwd` and `step.sh` files. The per-run test scripts and markers are created only at grading time, in a fresh container.
 
 ## 5. Mining and environments on real repositories
 
@@ -84,6 +84,6 @@ These ran as agent episodes on `pytest-dev__pytest-5227`, in its official image:
 
 ## 6. Real agent trajectories
 
-38 real SWE-agent 1.x trajectories (private, not committed) were imported with `swekit import-traj`. Two bugs surfaced and were fixed:
+38 real SWE-agent 1.x trajectories (private, not committed) were imported with `sweforge import-traj`. Two bugs surfaced and were fixed:
 - **Overwrites.** Several runs of the same task overwrote each other; repeated attempts are now kept as `<id>@2`, `@3`, ...
 - **Ungraded runs.** They were reported as 0% resolved; they are now listed separately and never counted as failures.

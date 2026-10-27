@@ -1,7 +1,7 @@
 import subprocess
 
-from swe_env_kit.sandbox import LocalSandbox
-from swe_env_kit.workspace import (apply_patch, checkout_base, collect_diff, prepare, revert_files, run_tests,
+from swe_env_forge.sandbox import LocalSandbox
+from swe_env_forge.workspace import (apply_patch, checkout_base, collect_diff, prepare, revert_files, run_tests,
                                    strip_future_history)
 
 

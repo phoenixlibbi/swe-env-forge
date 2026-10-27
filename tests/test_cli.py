@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from swe_env_kit.cli import main
-from swe_env_kit.task import load_tasks, read_jsonl
+from swe_env_forge.cli import main
+from swe_env_forge.task import load_tasks, read_jsonl
 
 
 @pytest.fixture(scope="module")
@@ -101,7 +101,7 @@ def test_spec_check_only_exit_code(pipeline, tmp_path):
     gold_line = next(ln[1:] for ln in t.gold_patch.splitlines() if ln.startswith("+") and len(ln) > 35
                      and not ln.startswith("+++"))
     t.problem_statement += "\nJust write: " + gold_line.strip()
-    from swe_env_kit.task import save_tasks
+    from swe_env_forge.task import save_tasks
 
     save_tasks(tmp_path / "leaky.jsonl", [t])
     assert main(["spec", str(tmp_path / "leaky.jsonl"), "--check-only"]) == 1

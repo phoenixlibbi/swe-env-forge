@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from swe_env_kit import hub
-from swe_env_kit.formats import (detect_format, from_generic, load_any, load_predictions, to_pro, to_swebench,
+from swe_env_forge import hub
+from swe_env_forge.formats import (detect_format, from_generic, load_any, load_predictions, to_pro, to_swebench,
                                  to_task)
-from swe_env_kit.presets import parse_swebench_eval_script, render_test_files, swebench_image
+from swe_env_forge.presets import parse_swebench_eval_script, render_test_files, swebench_image
 
 EVAL_SCRIPT = """#!/bin/bash
 set -uxo pipefail
@@ -53,7 +53,7 @@ def test_detect_format():
     assert detect_format(SWEBENCH_ROW) == "swebench"
     assert detect_format(PRO_ROW) == "swebench-pro"
     assert detect_format({"instance_id": "x"}) == "generic"
-    assert detect_format(to_task(SWEBENCH_ROW).to_dict()) == "swekit"
+    assert detect_format(to_task(SWEBENCH_ROW).to_dict()) == "sweforge"
 
 
 def test_eval_script_parsing():

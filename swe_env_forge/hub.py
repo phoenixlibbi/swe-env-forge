@@ -1,7 +1,7 @@
 """Network helpers: HuggingFace datasets-server, SWE-bench Pro scripts, GitHub REST API.
 
-Standard library only. Responses can be cached on disk (``SWEKIT_CACHE`` or
-``~/.cache/swe-env-kit``).
+Standard library only. Responses can be cached on disk (``SWEFORGE_CACHE`` or
+``~/.cache/swe-env-forge``).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterator
 
-USER_AGENT = "swe-env-kit (+https://github.com/phoenixlibbi/swe-env-kit)"
+USER_AGENT = "swe-env-forge (+https://github.com/phoenixlibbi/swe-env-forge)"
 HF_ROWS = "https://datasets-server.huggingface.co/rows"
 
 DATASETS = {
@@ -37,7 +37,7 @@ class HTTPError(RuntimeError):
 
 
 def cache_dir() -> Path:
-    root = Path(os.environ.get("SWEKIT_CACHE") or Path.home() / ".cache" / "swe-env-kit")
+    root = Path(os.environ.get("SWEFORGE_CACHE") or Path.home() / ".cache" / "swe-env-forge")
     root.mkdir(parents=True, exist_ok=True)
     return root
 

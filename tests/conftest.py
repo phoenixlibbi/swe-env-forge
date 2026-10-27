@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from swe_env_kit.demo import build_demo_repo
-from swe_env_kit.mine import MineConfig, mine_commits
+from swe_env_forge.demo import build_demo_repo
+from swe_env_forge.mine import MineConfig, mine_commits
 
 FLAKY_COUNTER = Path(tempfile.gettempdir()) / "minishop-flaky-counter"
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolated_cache(tmp_path_factory):
-    os.environ["SWEKIT_CACHE"] = str(tmp_path_factory.mktemp("swekit-cache"))
+    os.environ["SWEFORGE_CACHE"] = str(tmp_path_factory.mktemp("sweforge-cache"))
 
 
 @pytest.fixture(scope="session")

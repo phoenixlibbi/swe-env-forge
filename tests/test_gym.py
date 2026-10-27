@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-from swe_env_kit.agents import LLMAgent, NopAgent, OracleAgent, ReplayAgent, load_agent_class, parse_reply
-from swe_env_kit.gym import Budget, SWEEnv, run_batch, run_episode, truncate
-from swe_env_kit.llm import Usage
-from swe_env_kit.trajectory import Episode, from_swe_agent, load_episodes
-from swe_env_kit.validate import apply_validation, validate
+from swe_env_forge.agents import LLMAgent, NopAgent, OracleAgent, ReplayAgent, load_agent_class, parse_reply
+from swe_env_forge.gym import Budget, SWEEnv, run_batch, run_episode, truncate
+from swe_env_forge.llm import Usage
+from swe_env_forge.trajectory import Episode, from_swe_agent, load_episodes
+from swe_env_forge.validate import apply_validation, validate
 
 
 @pytest.fixture(scope="module")
@@ -130,7 +130,7 @@ def test_llm_agent_end_to_end(fix_task):
 
 
 def test_load_agent_class():
-    assert load_agent_class("swe_env_kit.agents:NopAgent") is NopAgent
+    assert load_agent_class("swe_env_forge.agents:NopAgent") is NopAgent
     with pytest.raises(ValueError):
         load_agent_class("nocolon")
 

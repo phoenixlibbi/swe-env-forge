@@ -124,7 +124,7 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
     """
     r = GradeResult(task.instance_id)
     if not task.fail_to_pass:
-        r.harness_error = "task has no FAIL_TO_PASS tests (run `swekit validate` first)"
+        r.harness_error = "task has no FAIL_TO_PASS tests (run `sweforge validate` first)"
         r.failure = "harness_error"
         return r
     checkout_base(sb, task)

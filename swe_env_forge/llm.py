@@ -1,8 +1,8 @@
 """A minimal client for OpenAI-compatible chat endpoints (OpenAI, OpenRouter, vLLM, Ollama, ...).
 
 Configuration comes from arguments or environment variables:
-``SWEKIT_LLM_BASE_URL`` (default ``https://api.openai.com/v1``), ``SWEKIT_LLM_API_KEY``
-(falls back to ``OPENAI_API_KEY``) and ``SWEKIT_LLM_MODEL``.
+``SWEFORGE_LLM_BASE_URL`` (default ``https://api.openai.com/v1``), ``SWEFORGE_LLM_API_KEY``
+(falls back to ``OPENAI_API_KEY``) and ``SWEFORGE_LLM_MODEL``.
 """
 
 from __future__ import annotations
@@ -36,9 +36,9 @@ class LLMError(RuntimeError):
 
 @dataclass
 class ChatClient:
-    model: str = field(default_factory=lambda: os.environ.get("SWEKIT_LLM_MODEL", ""))
-    base_url: str = field(default_factory=lambda: os.environ.get("SWEKIT_LLM_BASE_URL", "https://api.openai.com/v1"))
-    api_key: str = field(default_factory=lambda: os.environ.get("SWEKIT_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY", ""))
+    model: str = field(default_factory=lambda: os.environ.get("SWEFORGE_LLM_MODEL", ""))
+    base_url: str = field(default_factory=lambda: os.environ.get("SWEFORGE_LLM_BASE_URL", "https://api.openai.com/v1"))
+    api_key: str = field(default_factory=lambda: os.environ.get("SWEFORGE_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY", ""))
     input_price: float = 0.0      # USD per million prompt tokens
     output_price: float = 0.0     # USD per million completion tokens
     temperature: float = 0.0
@@ -61,7 +61,7 @@ class ChatClient:
 
     def _request(self, messages: list[dict[str, Any]], **extra) -> tuple[dict[str, Any], Usage]:
         if not self.model:
-            raise LLMError("no model set (pass --model or set SWEKIT_LLM_MODEL)")
+            raise LLMError("no model set (pass --model or set SWEFORGE_LLM_MODEL)")
         body = {"model": self.model, "messages": messages, "temperature": self.temperature,
                 "max_tokens": self.max_tokens, **extra}
         headers = {"Content-Type": "application/json"}

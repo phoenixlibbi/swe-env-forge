@@ -1,7 +1,7 @@
-from swe_env_kit.failure import classify, distribution, llm_judge, stuck_in_loop
-from swe_env_kit.report import budget_curves, build_report, solved_at, to_markdown
-from swe_env_kit.task import Task
-from swe_env_kit.trajectory import Checkpoint, Episode, Step
+from swe_env_forge.failure import classify, distribution, llm_judge, stuck_in_loop
+from swe_env_forge.report import budget_curves, build_report, solved_at, to_markdown
+from swe_env_forge.task import Task
+from swe_env_forge.trajectory import Checkpoint, Episode, Step
 
 GOLD = "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-a\n+b\n"
 OTHER = "diff --git a/src/b.py b/src/b.py\n--- a/src/b.py\n+++ b/src/b.py\n@@ -1 +1 @@\n-a\n+b\n"
@@ -96,7 +96,7 @@ def test_build_report_and_markdown():
 def test_report_from_grades_only():
     r = build_report(grades=[{"instance_id": "a", "resolved": True, "dense": 1.0}], tasks=[task("a")])
     assert r["n"] == 1 and "budget_curves" not in r
-    assert "# swe-env-kit report" in to_markdown([r])
+    assert "# swe-env-forge report" in to_markdown([r])
 
 
 def test_llm_judge_parses_bucket():
@@ -123,7 +123,7 @@ def test_repeated_attempts_are_kept(tmp_path):
     first.save(tmp_path, unique=True)
     second.save(tmp_path, unique=True)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["t", "t@2"]
-    from swe_env_kit.trajectory import load_episodes
+    from swe_env_forge.trajectory import load_episodes
 
     eps = load_episodes(tmp_path)
     assert len(eps) == 2 and eps[1].metadata["attempt"] == 2

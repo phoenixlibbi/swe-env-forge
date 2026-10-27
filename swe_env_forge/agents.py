@@ -1,7 +1,7 @@
 """Reference agents: nop, oracle, replay and an LLM agent for OpenAI-compatible endpoints.
 
 An agent implements ``reset(observation)`` and ``act(last_output) -> action``. Add your
-own by passing ``--agent module.path:ClassName`` to ``swekit run``; the class is called
+own by passing ``--agent module.path:ClassName`` to ``sweforge run``; the class is called
 with the task as its only argument.
 """
 
@@ -37,7 +37,7 @@ class OracleAgent:
     """Applies the gold patch through the normal action interface. Its score is the ceiling."""
 
     name = "oracle"
-    _PATH = ".swekit_oracle.diff"
+    _PATH = ".sweforge_oracle.diff"
 
     def __init__(self, task: Task):
         self.task = task
@@ -58,7 +58,7 @@ class OracleAgent:
 class ReplayAgent:
     """Replays a fixed list of actions (bash strings or action dicts), then submits.
 
-    Sources: a swe-env-kit episode folder or ``trajectory.jsonl``, a JSON list, or a text
+    Sources: a swe-env-forge episode folder or ``trajectory.jsonl``, a JSON list, or a text
     file with one command per line.
     """
 
@@ -131,7 +131,7 @@ class LLMAgent:
     """A tool-using agent in the style of SWE-agent, for any OpenAI-compatible model.
 
     * ``mode="tools"`` (default): native function calling with bash, str_replace_editor, search,
-      find_file and submit (see :mod:`swe_env_kit.tools`).
+      find_file and submit (see :mod:`swe_env_forge.tools`).
     * ``mode="text"``: for models without function calling; one ```bash block per reply, or SUBMIT.
 
     Context management follows SWE-agent: the last ``keep_observations`` tool outputs stay in

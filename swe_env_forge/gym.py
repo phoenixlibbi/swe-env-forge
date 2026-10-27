@@ -6,7 +6,7 @@ action and returns ``(observation, done, info)``. Supported actions::
 
     {"type": "bash", "command": "pytest -x tests/"}
     {"type": "editor", "command": "str_replace", "path": "pkg/x.py", "old_str": "...", "new_str": "..."}
-    {"type": "search", "pattern": "def apply_discount"}       # see swe_env_kit.tools for all tools
+    {"type": "search", "pattern": "def apply_discount"}       # see swe_env_forge.tools for all tools
     {"type": "write_file", "path": "pkg/x.py", "content": "..."}
     {"type": "submit"}
 
@@ -97,7 +97,7 @@ class SWEEnv:
         cwd_file = f"{sb.scratch}/cwd"
         prefix = [ln for ln in shell_prefix(self.task, sb) if not ln.startswith("cd ")]
         script = "\n".join([*prefix, f'cd "$(cat {shlex.quote(cwd_file)} 2>/dev/null)" 2>/dev/null || cd {shlex.quote(sb.workdir)}',
-                            command, "__swekit_rc=$?", f"pwd > {shlex.quote(cwd_file)}", "exit $__swekit_rc"])
+                            command, "__sweforge_rc=$?", f"pwd > {shlex.quote(cwd_file)}", "exit $__sweforge_rc"])
         path = f"{sb.scratch}/step.sh"
         sb.write_file(path, script)
         limit = self.budget.command_timeout

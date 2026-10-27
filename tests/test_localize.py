@@ -1,6 +1,6 @@
-from swe_env_kit.localize import (BM25, build_prompt, extract_patch, fill_budget, localize_task, oracle_files,
+from swe_env_forge.localize import (BM25, build_prompt, extract_patch, fill_budget, localize_task, oracle_files,
                                   rank_files, read_files, summarize, tokenize)
-from swe_env_kit.workspace import repo_cache
+from swe_env_forge.workspace import repo_cache
 
 
 def test_tokenize_splits_identifiers():

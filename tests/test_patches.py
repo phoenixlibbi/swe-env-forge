@@ -1,4 +1,4 @@
-from swe_env_kit.patches import (added_definitions, added_lines, files_in, identifiers, parse_patch,
+from swe_env_forge.patches import (added_definitions, added_lines, files_in, identifiers, parse_patch,
                                  patch_stats, split_patch, strip_binary)
 
 FIX = """\

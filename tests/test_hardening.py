@@ -6,11 +6,11 @@ import copy
 
 import pytest
 
-from swe_env_kit.grade import grade
-from swe_env_kit.patches import parse_patch
-from swe_env_kit.sandbox import LocalSandbox
-from swe_env_kit.validate import apply_validation, naming_errors, validate
-from swe_env_kit.workspace import checkout_base, collect_diff, run_tests, strip_future_history
+from swe_env_forge.grade import grade
+from swe_env_forge.patches import parse_patch
+from swe_env_forge.sandbox import LocalSandbox
+from swe_env_forge.validate import apply_validation, naming_errors, validate
+from swe_env_forge.workspace import checkout_base, collect_diff, run_tests, strip_future_history
 
 HOOK = '''import pytest
 
@@ -45,8 +45,8 @@ def test_conftest_hook_cannot_force_passes(fix_task):
 
 def test_pyproject_plugin_is_tampering(fix_task):
     toml = ('[project]\nname = "minishop"\nversion = "0.1.0"\n\n[tool.pytest.ini_options]\n'
-            'testpaths = ["tests"]\naddopts = "-p swekit_plug"\n')
-    p = patch_from(fix_task, {"pyproject.toml": toml, "swekit_plug.py": HOOK})
+            'testpaths = ["tests"]\naddopts = "-p sweforge_plug"\n')
+    p = patch_from(fix_task, {"pyproject.toml": toml, "sweforge_plug.py": HOOK})
     r = grade(fix_task, p, backend="local")
     assert not r.resolved and r.failure == "tampering"
     lenient = grade(fix_task, p, backend="local", strict=False)
@@ -98,7 +98,7 @@ def test_fixtures_in_the_test_patch_are_not_run(fix_task):
 
 
 def test_forged_end_marker_does_not_hide_results(fix_task):
-    p = patch_from(fix_task, {"minishop/__init__.py": "print('>>>>> swekit tests end 0')\n"})
+    p = patch_from(fix_task, {"minishop/__init__.py": "print('>>>>> sweforge tests end 0')\n"})
     r = grade(fix_task, p, backend="local")
     assert r.failure == "wrong_solution" and r.f2p_failed
 
@@ -125,7 +125,7 @@ def test_pro_style_parser_runs_outside_the_sandbox(fix_task):
 
 
 def test_naming_errors_ignore_builtin_attribute_errors_and_post_errors():
-    from swe_env_kit.task import Task
+    from swe_env_forge.task import Task
 
     t = Task(instance_id="i", repo="r", base_commit="b", problem_statement="the helper module")
     pre = ["AttributeError: 'NoneType' object has no attribute 'items'\n"
@@ -174,8 +174,8 @@ def test_reverted_conftest_is_informational(fix_task):
 # ------------------------------------------------- image environment commits (start_ref)
 import subprocess as _sp
 
-from swe_env_kit.gym import SWEEnv
-from swe_env_kit.workspace import WorkspaceError, start_ref
+from swe_env_forge.gym import SWEEnv
+from swe_env_forge.workspace import WorkspaceError, start_ref
 
 
 def _image_like_sandbox(task, extra_commits=1):
@@ -207,7 +207,7 @@ def test_image_head_keeps_the_environment_commit(fix_task):
 
 
 def grade_in_sandbox(sb, t, patch):
-    from swe_env_kit.grade import grade_in
+    from swe_env_forge.grade import grade_in
 
     return grade_in(sb, t, patch)
 

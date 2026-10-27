@@ -3,8 +3,8 @@
 SWE-bench Pro paid engineers to refine each Dockerfile "until the resulting Docker images
 could successfully run the codebase and its tests". This automates that loop:
 
-1. start from the detected plan (:mod:`swe_env_kit.envdetect`) or the task's own Dockerfile;
-2. build the image and run :func:`swe_env_kit.validate.validate` on it;
+1. start from the detected plan (:mod:`swe_env_forge.envdetect`) or the task's own Dockerfile;
+2. build the image and run :func:`swe_env_forge.validate.validate` on it;
 3. if the build fails or the task is not valid, show a model the Dockerfile, the test command
    and the tail of the failing log, and ask for a repaired environment;
 4. repeat until the task validates or the attempts run out.

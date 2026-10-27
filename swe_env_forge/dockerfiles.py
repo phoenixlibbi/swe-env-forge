@@ -51,13 +51,13 @@ def generate_dockerfile(task: Task, from_bundle: bool | None = None) -> str:
 def build_default_image(task: Task, tag: str) -> str:
     """Build the generated Dockerfile for ``task`` as ``tag``; returns the build log."""
     dockerfile = generate_dockerfile(task)
-    with tempfile.TemporaryDirectory(prefix="swekit-ctx-") as ctx:
+    with tempfile.TemporaryDirectory(prefix="sweforge-ctx-") as ctx:
         if _is_local(task.clone_url):
             # Bundle only the base commit's history: a bundle of --all would ship the fix.
             from .workspace import _locked, repo_cache
 
             mirror = repo_cache(task.clone_url, task.base_commit)
-            ref = f"refs/heads/swekit-base-{task.base_commit[:12]}"
+            ref = f"refs/heads/sweforge-base-{task.base_commit[:12]}"
             with _locked(mirror):
                 subprocess.run(["git", "-C", str(mirror), "update-ref", ref, task.base_commit], check=True)
                 try:

@@ -1,8 +1,8 @@
 import json
 
-from swe_env_kit.envagent import check_proposal, setup_environment, summary
-from swe_env_kit.task import Task
-from swe_env_kit.validate import ValidationResult
+from swe_env_forge.envagent import check_proposal, setup_environment, summary
+from swe_env_forge.task import Task
+from swe_env_forge.validate import ValidationResult
 
 BASE = "a" * 40
 DF = f"FROM python:3.11\nRUN git clone -q https://x/r /testbed; cd /testbed && git checkout -q {BASE}\n"

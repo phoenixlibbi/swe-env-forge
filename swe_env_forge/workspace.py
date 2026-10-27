@@ -24,7 +24,7 @@ from .sandbox import (DockerSandbox, ExecResult, LocalSandbox, Sandbox, SandboxE
                       docker_image_exists)
 from .task import Task
 
-START_MARK, END_MARK = ">>>>> swekit tests start", ">>>>> swekit tests end"
+START_MARK, END_MARK = ">>>>> sweforge tests start", ">>>>> sweforge tests end"
 # safe.directory=* is quoted: an unquoted * would be glob-expanded by files the agent creates.
 GIT = "git -c core.hooksPath=/dev/null -c advice.detachedHead=false -c 'safe.directory=*'"
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -90,7 +90,7 @@ def repo_cache(url: str, commit: str | None = None) -> Path:
 # ------------------------------------------------------------------ sandboxes
 def image_tag(task: Task) -> str:
     slug = re.sub(r"[^a-z0-9_.-]+", "-", task.instance_id.lower()).strip("-.")[:100]
-    return f"swekit/{slug}:latest"
+    return f"sweforge/{slug}:latest"
 
 
 def ensure_image(task: Task, rebuild: bool = False) -> str:
@@ -119,7 +119,7 @@ def open_sandbox(task: Task, backend: str = "docker", *, network: bool = True, k
         image = ensure_image(task)
         return DockerSandbox(image, task.env.workdir, platform=task.env.platform, network=network,
                              env_vars=task.env.env_vars, keep=keep, memory=memory,
-                             pull=not image.startswith("swekit/"), services=task.env.services)
+                             pull=not image.startswith("sweforge/"), services=task.env.services)
     raise ValueError(f"unknown backend {backend!r} (docker or local)")
 
 
@@ -199,10 +199,10 @@ rm -f "$gitdir"/objects/pack/*.keep
 {GIT} repack -a -d -q
 rm -f "$gitdir"/objects/info/alternates
 {GIT} prune --expire=now
-{GIT} cat-file --batch-all-objects --batch-check='%(objecttype) %(objectname)' | awk '$1=="commit"{{print $2}}' | sort > "$gitdir"/swekit-all
-{GIT} rev-list {b} | sort > "$gitdir"/swekit-anc
-left=$(comm -23 "$gitdir"/swekit-all "$gitdir"/swekit-anc | head -n 1)
-rm -f "$gitdir"/swekit-all "$gitdir"/swekit-anc
+{GIT} cat-file --batch-all-objects --batch-check='%(objecttype) %(objectname)' | awk '$1=="commit"{{print $2}}' | sort > "$gitdir"/sweforge-all
+{GIT} rev-list {b} | sort > "$gitdir"/sweforge-anc
+left=$(comm -23 "$gitdir"/sweforge-all "$gitdir"/sweforge-anc | head -n 1)
+rm -f "$gitdir"/sweforge-all "$gitdir"/sweforge-anc
 if [ -n "$left" ]; then echo "future commit still in the object store: $left"; exit 3; fi
 echo history-stripped
 """
@@ -320,7 +320,7 @@ def shell_prefix(task: Task, sb: Sandbox) -> list[str]:
 
 def _host_parse(parser_script: str, stdout: str, stderr: str) -> str:
     """Run a trusted Pro ``parser.py`` on the host, away from code under test."""
-    with tempfile.TemporaryDirectory(prefix="swekit-parse-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="sweforge-parse-") as tmp:
         d = Path(tmp)
         (d / "parser.py").write_text(parser_script, encoding="utf-8")
         (d / "stdout.log").write_text(stdout, encoding="utf-8")
@@ -373,7 +373,7 @@ def run_tests(sb: Sandbox, task: Task, timeout: float | None = None, label: str 
             segment = _host_parse(task.env.parser_script or "", outs["stdout.log"], outs["stderr.log"])
         except (WorkspaceError, subprocess.SubprocessError, OSError) as exc:
             segment = ""
-            log += f"\n[swekit] {exc}"
+            log += f"\n[sweforge] {exc}"
         log += f"\n----- stdout.log -----\n{outs['stdout.log'][-200_000:]}\n----- stderr.log -----\n{outs['stderr.log'][-50_000:]}"
     else:
         segment = log.split(start, 1)[1] if start in log else log

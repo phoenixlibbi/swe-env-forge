@@ -1,7 +1,7 @@
-from swe_env_kit.grade import grade, tamper_flags
-from swe_env_kit.sandbox import LocalSandbox
-from swe_env_kit.validate import apply_validation, validate
-from swe_env_kit.workspace import checkout_base, collect_diff
+from swe_env_forge.grade import grade, tamper_flags
+from swe_env_forge.sandbox import LocalSandbox
+from swe_env_forge.validate import apply_validation, validate
+from swe_env_forge.workspace import checkout_base, collect_diff
 
 
 def validated(task, **kw):
@@ -149,9 +149,9 @@ def test_tamper_flags_respect_source_files_under_test_dirs():
 
 
 def test_changed_test_functions_maps_hunks_to_enclosing_tests():
-    from swe_env_kit.sandbox import LocalSandbox
-    from swe_env_kit.task import Task
-    from swe_env_kit.validate import _test_name_matches, changed_test_functions
+    from swe_env_forge.sandbox import LocalSandbox
+    from swe_env_forge.task import Task
+    from swe_env_forge.validate import _test_name_matches, changed_test_functions
 
     new_file = ("import hashlib\nfrom pkg import _lazy\n\n\nclass TestS:\n    def test_iter(self):\n"
                 "        x = 1\n        assert x == _lazy\n\n    def test_other(self):\n        assert True\n")

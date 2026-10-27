@@ -1,13 +1,13 @@
-# swe-env-kit
+# SWE Env Forge
 
-> From git history to RL reward: a toolkit to mine, validate, specify, run and grade SWE-bench / SWE-bench Pro style software-engineering tasks in any language, with tamper-proof binary and dense rewards.
+> **Forge verified, hack-resistant RL environments for coding agents from any git repository.** Mine tasks from history, build their environments, prove each one fair, write the task text, run agents under real budgets, and grade them with a verifier that rejects fake fixes the official SWE-bench harness accepts. Compatible with SWE-bench and SWE-bench Pro.
 
-[![CI](https://github.com/phoenixlibbi/swe-env-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/phoenixlibbi/swe-env-kit/actions/workflows/ci.yml)
+[![CI](https://github.com/phoenixlibbi/swe-env-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/phoenixlibbi/swe-env-forge/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-**Every coding benchmark task is an RL environment plus a verifier.** `swekit` (the CLI and Python package of this repo) builds both the way [SWE-bench](https://arxiv.org/abs/2310.06770) and [SWE-bench Pro](https://arxiv.org/abs/2509.16941) do:
+**Every coding benchmark task is an RL environment plus a verifier.** `sweforge` (the CLI and Python package of this repo) builds both the way [SWE-bench](https://arxiv.org/abs/2310.06770) and [SWE-bench Pro](https://arxiv.org/abs/2509.16941) do:
 1. It turns a repository's history into tasks.
 2. It proves each task is fair by running the tests before and after the real fix.
 3. It writes the task description an agent is allowed to see.
@@ -27,26 +27,26 @@
 
 | Command | What it does | Docker / LLM needed |
 |---|---|---|
-| `swekit fetch` / `convert` | Download SWE-bench, Lite, Verified or Pro from HuggingFace; convert between swe-env-kit, SWE-bench, Pro and generic rows | no / no |
-| `swekit mine` | Turn git history into candidate tasks: merged PRs that close an issue (SWE-bench), consecutive commit pairs (Pro, works on private repos), or commit windows for repos that push code and tests separately | no / no |
-| `swekit stats` | Fix size, "trivial 1–2 line" tasks, Pro eligibility, static naming leaks, license class | no / no |
-| `swekit spec` | Write the Pro-style problem statement, requirements and interface: deterministic drafts, an LLM writer, or your own agent; leak check | no / optional |
-| `swekit spec-export` / `spec-import` | Human review: one editable Markdown file per task; records who wrote and reviewed every field | no / no |
-| `swekit env` | Build each task's environment. `--detect` reads the repo's CI workflows, version files and manifests (and its backing services). `--setup` adds an agent that builds, validates and repairs the environment until the task validates | yes / optional |
-| `swekit validate` | Run the tests before and after the reference fix N times, plus once at the base without the new tests: FAIL_TO_PASS, PASS_TO_PASS, flaky tests, tests the fix breaks, naming leaks, F2P tests that only failed to import, missing dependencies | yes (or `--backend local`) / no |
-| `swekit run` | Run an agent in a gym with SWE-agent style tools (bash, `str_replace_editor`, search, find_file), turn / cost / time budgets and checkpoint grading. Agents: nop, oracle, replay, a tool-calling LLM agent, or your class | yes / optional |
-| `swekit grade` | Grade patches (SWE-bench predictions format) with a tamper guard; binary + dense reward; CI gate with `--expect` | yes / no |
-| `swekit import-traj` | Import SWE-agent `.traj` files so existing runs can be graded, reported and failure-classified | optional / no |
-| `swekit report` | Resolve rate by language, fix size and file count; budget curves; failure modes; compare runs side by side | no / no |
-| `swekit localize` | BM25 vs oracle file retrieval at 13k / 27k / 50k token budgets (SWE-bench's Table 3) | no / no |
+| `sweforge fetch` / `convert` | Download SWE-bench, Lite, Verified or Pro from HuggingFace; convert between swe-env-forge, SWE-bench, Pro and generic rows | no / no |
+| `sweforge mine` | Turn git history into candidate tasks: merged PRs that close an issue (SWE-bench), consecutive commit pairs (Pro, works on private repos), or commit windows for repos that push code and tests separately | no / no |
+| `sweforge stats` | Fix size, "trivial 1–2 line" tasks, Pro eligibility, static naming leaks, license class | no / no |
+| `sweforge spec` | Write the Pro-style problem statement, requirements and interface: deterministic drafts, an LLM writer, or your own agent; leak check | no / optional |
+| `sweforge spec-export` / `spec-import` | Human review: one editable Markdown file per task; records who wrote and reviewed every field | no / no |
+| `sweforge env` | Build each task's environment. `--detect` reads the repo's CI workflows, version files and manifests (and its backing services). `--setup` adds an agent that builds, validates and repairs the environment until the task validates | yes / optional |
+| `sweforge validate` | Run the tests before and after the reference fix N times, plus once at the base without the new tests: FAIL_TO_PASS, PASS_TO_PASS, flaky tests, tests the fix breaks, naming leaks, F2P tests that only failed to import, missing dependencies | yes (or `--backend local`) / no |
+| `sweforge run` | Run an agent in a gym with SWE-agent style tools (bash, `str_replace_editor`, search, find_file), turn / cost / time budgets and checkpoint grading. Agents: nop, oracle, replay, a tool-calling LLM agent, or your class | yes / optional |
+| `sweforge grade` | Grade patches (SWE-bench predictions format) with a tamper guard; binary + dense reward; CI gate with `--expect` | yes / no |
+| `sweforge import-traj` | Import SWE-agent `.traj` files so existing runs can be graded, reported and failure-classified | optional / no |
+| `sweforge report` | Resolve rate by language, fix size and file count; budget curves; failure modes; compare runs side by side | no / no |
+| `sweforge localize` | BM25 vs oracle file retrieval at 13k / 27k / 50k token budgets (SWE-bench's Table 3) | no / no |
 
 It has no dependencies beyond the Python standard library. Docker and git are used through their CLIs, and LLMs through any OpenAI-compatible HTTP endpoint.
 
 ## Why labs and data teams use it
 
-Frontier labs train coding models with RL on SWE-style tasks and report SWE-bench / Pro scores. These are the problems that work runs into, and what swe-env-kit does about each:
+Frontier labs train coding models with RL on SWE-style tasks and report SWE-bench / Pro scores. These are the problems that work runs into, and what swe-env-forge does about each:
 
-| Problem | Why it hurts | What swe-env-kit does |
+| Problem | Why it hurts | What swe-env-forge does |
 |---|---|---|
 | **Fresh tasks are scarce.** Public benchmarks are saturated (Verified over 70%) and likely in pre-training data. | Scores on memorized tasks measure nothing. Labs buy new tasks from data vendors. | `mine --mode commits` turns any repository, **including private or licensed code**, into tasks with Pro's method. `stats` measures triviality and license-based contamination risk. |
 | **Rewards get hacked.** Policies learn to edit tests, add a `conftest.py` that fakes passes, or read the fix from git history. | A hackable reward trains the model to cheat and wastes the RL compute. | The tamper guard reverts tests, helpers and runner config. Agents run offline. Future history is purged and the purge verified. Pro's parser runs outside the sandbox. Each attack is a regression test. |
@@ -74,25 +74,25 @@ Frontier labs train coding models with RL on SWE-style tasks and report SWE-benc
 
 **"Turn our private repo into an RL environment."**
 ```bash
-swekit mine ~/code/our-service -o mined.jsonl --pro --window 3   # commit pairs or windows, >= 10 changed lines
-swekit env mined.jsonl --setup --model gpt-4.1 --write envs.jsonl  # detect from CI, build, validate, repair
-swekit validate envs.jsonl -o valid.jsonl --runs 3                 # F2P / P2P, flaky tests out, naming leaks flagged
-swekit spec valid.jsonl -o specced.jsonl --mode llm --model gpt-4.1   # or: --mode draft, then human review
-swekit spec-export specced.jsonl review/ && swekit spec-import specced.jsonl review/ -o final.jsonl --require-reviewed
+sweforge mine ~/code/our-service -o mined.jsonl --pro --window 3   # commit pairs or windows, >= 10 changed lines
+sweforge env mined.jsonl --setup --model gpt-4.1 --write envs.jsonl  # detect from CI, build, validate, repair
+sweforge validate envs.jsonl -o valid.jsonl --runs 3                 # F2P / P2P, flaky tests out, naming leaks flagged
+sweforge spec valid.jsonl -o specced.jsonl --mode llm --model gpt-4.1   # or: --mode draft, then human review
+sweforge spec-export specced.jsonl review/ && sweforge spec-import specced.jsonl review/ -o final.jsonl --require-reviewed
 ```
 
 **"What does our agent really score, and why does it fail?"**
 ```bash
-swekit fetch swebench-pro -o pro.jsonl --with-scripts --limit 50
-swekit run pro.jsonl --agent mypkg.agent:MyAgent -o runs/mine --max-turns 50 --max-cost 2 --checkpoint-every 5 --grade-checkpoints
-swekit report runs/mine --tasks pro.jsonl --md report.md       # by language / size, budget curves, failure modes
+sweforge fetch swebench-pro -o pro.jsonl --with-scripts --limit 50
+sweforge run pro.jsonl --agent mypkg.agent:MyAgent -o runs/mine --max-turns 50 --max-cost 2 --checkpoint-every 5 --grade-checkpoints
+sweforge report runs/mine --tasks pro.jsonl --md report.md       # by language / size, budget curves, failure modes
 ```
 
 **"Is this task safe to train on?"**
 ```bash
-swekit grade tasks.jsonl --gold --expect resolved      # the reference fix must pass
-swekit grade tasks.jsonl --nop  --expect unresolved    # doing nothing must fail
-swekit spec tasks.jsonl --check-only                   # no field may copy code from the fix
+sweforge grade tasks.jsonl --gold --expect resolved      # the reference fix must pass
+sweforge grade tasks.jsonl --nop  --expect unresolved    # doing nothing must fail
+sweforge spec tasks.jsonl --check-only                   # no field may copy code from the fix
 ```
 
 ### Use in CI
@@ -109,10 +109,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install git+https://github.com/phoenixlibbi/swe-env-kit
-      - run: swekit spec tasks.jsonl --check-only
-      - run: swekit grade tasks.jsonl --gold --expect resolved
-      - run: swekit grade tasks.jsonl --nop --expect unresolved
+      - run: pip install git+https://github.com/phoenixlibbi/swe-env-forge
+      - run: sweforge spec tasks.jsonl --check-only
+      - run: sweforge grade tasks.jsonl --gold --expect resolved
+      - run: sweforge grade tasks.jsonl --nop --expect unresolved
 ```
 
 Exit codes:
@@ -141,7 +141,7 @@ Exit codes:
 - **Human augmentation:** experts write a problem statement, **requirements** and an **interface** for every task. Strict unit tests then stop rejecting valid solutions over a different function name, a "false negative".
 - **Evaluation:** agents run in SWE-agent with a 50-turn limit. Top models scored about 23% under a $2 cost cap and up to 43.6% uncapped, and the paper classifies failures with an LLM judge.
 
-| | SWE-bench | SWE-bench Pro | swe-env-kit |
+| | SWE-bench | SWE-bench Pro | swe-env-forge |
 |---|---|---|---|
 | Task source | merged PR + linked issue | consecutive commit pair | both (`mine --mode prs / commits`) |
 | Languages | Python | Python, Go, JS, TS | any; 20+ test-log formats |
@@ -180,9 +180,9 @@ Exit codes:
 
 ### 1. The tool reproduces the papers' own measurements
 
-From `swekit stats` on the public datasets as published on HuggingFace (Verified: 500 tasks; Pro public split: 642 tasks):
+From `sweforge stats` on the public datasets as published on HuggingFace (Verified: 500 tasks; Pro public split: 642 tasks):
 
-| | swe-env-kit | Pro paper |
+| | swe-env-forge | Pro paper |
 |---|---|---|
 | Verified tasks needing only 1–2 edited lines | **161 / 500** | "161 out of 500" |
 | Pro reference fix, mean edited lines | **107.8** | 107.4 |
@@ -198,7 +198,7 @@ The static check counts tasks where the hidden tests call a function or class th
 |---|---|
 | problem statement only | **44.7%** (287 / 642) |
 | + Pro's human requirements and interface | **3.7%** |
-| + swe-env-kit's automatic `spec` drafts | **2.2%** |
+| + swe-env-forge's automatic `spec` drafts | **2.2%** |
 | *(SWE-bench Verified, statement only)* | *1.4%*: SWE-bench filtered these tasks out |
 
 This is the mechanism behind the paper's ablation, where GPT-5 drops from 25.9% to 8.4% without the augmentations.
@@ -207,9 +207,9 @@ Caveat: the 2.2% is partly by construction, because the drafter and the checker 
 
 ### 3. Retrieval is the bottleneck SWE-bench reported
 
-`swekit localize` on all 300 SWE-bench Lite tasks: the share of tasks where BM25 (file paths prepended, code-aware tokens) puts the files the fix edits into the prompt at each token budget.
+`sweforge localize` on all 300 SWE-bench Lite tasks: the share of tasks where BM25 (file paths prepended, code-aware tokens) puts the files the fix edits into the prompt at each token budget.
 
-| Token budget | swe-env-kit, Lite (300) | SWE-bench paper, full test set ("all" recall) |
+| Token budget | swe-env-forge, Lite (300) | SWE-bench paper, full test set ("all" recall) |
 |---|---|---|
 | 13k | 25.7% | 26.1% |
 | 27k | 47.0% | 39.8% |
@@ -217,7 +217,7 @@ Caveat: the 2.2% is partly by construction, because the drafter and the checker 
 
 Rank metrics: recall@1 36.0%, recall@5 65.7%, recall@10 74.7%, MRR 0.50.
 
-Even at 50k tokens, **41% of tasks never show the model the file it must change**, and a bigger budget adds noise. That is why SWE-bench's one-shot baselines solved about 2%, and why Pro (and `swekit run`) let the agent search for itself.
+Even at 50k tokens, **41% of tasks never show the model the file it must change**, and a bigger budget adds noise. That is why SWE-bench's one-shot baselines solved about 2%, and why Pro (and `sweforge run`) let the agent search for itself.
 
 How to read the comparison: Lite tasks edit a single file, so "all", "any" and "average" recall coincide. Our token counts approximate the paper's tokenizer at about 4 characters per token, or use `tiktoken` when it is installed.
 
@@ -235,13 +235,13 @@ Every check below used the benchmarks' **own** images and data. The full log, wi
   | SWE-bench Pro navidrome (Go) | identical |
   | django-11099 | one dataset F2P test passes *before* the fix in the official image |
 
-- **Official harness.** The predictions file written by `swekit run` scored **2/2 resolved** in the official `swebench` package (v5.0.2).
+- **Official harness.** The predictions file written by `sweforge run` scored **2/2 resolved** in the official `swebench` package (v5.0.2).
 - **Real repository, end to end.** `pallets/itsdangerous` went through mine, build, validate, spec, grade. It produced 2 valid tasks. 3 candidates were correctly rejected: two were not behaviour changes, and one had a missing test dependency.
 - **The answer stays hidden.** Agents in these sandboxes see no commit after the base (none of django's 26,747), have no network, and find nothing hidden in their scratch space.
 
-**The official SWE-bench harness accepts a fake fix that swe-env-kit rejects.**
+**The official SWE-bench harness accepts a fake fix that swe-env-forge rejects.**
 
-| Patch for `pytest-dev__pytest-5227` (none of them fixes the bug) | Official harness | swe-env-kit |
+| Patch for `pytest-dev__pytest-5227` (none of them fixes the bug) | Official harness | swe-env-forge |
 |---|---|---|
 | Adds `conftest.py` files whose pytest hook marks every test passed | **resolved** | not resolved: reverted and flagged |
 | Overwrites the hidden test file | unresolved | not resolved |
@@ -267,8 +267,8 @@ An independent review attacked the grader and the sandbox. Every finding is fixe
 ## Install
 
 ```bash
-pip install git+https://github.com/phoenixlibbi/swe-env-kit
-swekit --version
+pip install git+https://github.com/phoenixlibbi/swe-env-forge
+sweforge --version
 ```
 
 You need Python 3.10+ and git. Docker is needed for the `docker` backend, which is the default and the real sandbox. On Apple Silicon, the x86 benchmark images run under emulation; `env.platform` is set for you.
@@ -283,13 +283,13 @@ The package ships an original demo repository with a realistic history:
 - a commit with a flaky test.
 
 ```bash
-swekit demo minishop                                   # build the demo repo
-swekit mine minishop -o mined.jsonl                    # 4 candidate tasks (the docs-only commit is skipped)
-swekit spec mined.jsonl -o spec.jsonl                  # draft interface + requirements
-swekit validate spec.jsonl -o tasks.jsonl --backend local --runs 2
-swekit run tasks.jsonl --agent oracle -o runs/oracle --backend local --checkpoint-every 1 --grade-checkpoints
-swekit run tasks.jsonl --agent nop    -o runs/nop    --backend local
-swekit report runs/oracle runs/nop --tasks tasks.jsonl
+sweforge demo minishop                                   # build the demo repo
+sweforge mine minishop -o mined.jsonl                    # 4 candidate tasks (the docs-only commit is skipped)
+sweforge spec mined.jsonl -o spec.jsonl                  # draft interface + requirements
+sweforge validate spec.jsonl -o tasks.jsonl --backend local --runs 2
+sweforge run tasks.jsonl --agent oracle -o runs/oracle --backend local --checkpoint-every 1 --grade-checkpoints
+sweforge run tasks.jsonl --agent nop    -o runs/nop    --backend local
+sweforge report runs/oracle runs/nop --tasks tasks.jsonl
 ```
 
 What `validate` finds:
@@ -308,12 +308,12 @@ demo__minishop-0952843e2bf7: valid f2p=1 p2p=0 flaky_tests:1       # the alterna
 ### Get tasks
 
 ```bash
-swekit fetch swebench-verified -o verified.jsonl                 # official image, eval script and parser per task
-swekit fetch swebench-pro -o pro.jsonl --with-scripts --limit 20 # + Pro's run_script.sh / parser.py per task
-swekit mine owner/name --mode prs -o prs.jsonl --max-prs 300     # SWE-bench rules (needs a GitHub token or `gh auth`)
-swekit mine ./repo -o commits.jsonl --pro --since 2024-01-01     # Pro rules, offline, private repos fine
-swekit convert other.jsonl -o tasks.jsonl                        # generic rows, including SWE-bench style `specs` dicts
-swekit convert tasks.jsonl --to swebench -o sb.jsonl             # export for the official SWE-bench harness
+sweforge fetch swebench-verified -o verified.jsonl                 # official image, eval script and parser per task
+sweforge fetch swebench-pro -o pro.jsonl --with-scripts --limit 20 # + Pro's run_script.sh / parser.py per task
+sweforge mine owner/name --mode prs -o prs.jsonl --max-prs 300     # SWE-bench rules (needs a GitHub token or `gh auth`)
+sweforge mine ./repo -o commits.jsonl --pro --since 2024-01-01     # Pro rules, offline, private repos fine
+sweforge convert other.jsonl -o tasks.jsonl                        # generic rows, including SWE-bench style `specs` dicts
+sweforge convert tasks.jsonl --to swebench -o sb.jsonl             # export for the official SWE-bench harness
 ```
 
 ### Build environments for any repository
@@ -321,9 +321,9 @@ swekit convert tasks.jsonl --to swebench -o sb.jsonl             # export for th
 Benchmarks ship prebuilt images. For your own repositories, `env` builds them in three layers:
 
 ```bash
-swekit env tasks.jsonl --detect --write detected.jsonl   # 1. read the repo's own CI workflows, version files, manifests
-swekit env detected.jsonl --build                         #    and build (Postgres, Redis, ... start as sidecars)
-swekit env tasks.jsonl --setup --model gpt-4.1 --write ready.jsonl   # 2+3. detect, build, validate, LLM repair loop
+sweforge env tasks.jsonl --detect --write detected.jsonl   # 1. read the repo's own CI workflows, version files, manifests
+sweforge env detected.jsonl --build                         #    and build (Postgres, Redis, ... start as sidecars)
+sweforge env tasks.jsonl --setup --model gpt-4.1 --write ready.jsonl   # 2+3. detect, build, validate, LLM repair loop
 ```
 
 1. **Detection** (`envdetect`) reads, at the task's base commit:
@@ -339,14 +339,14 @@ swekit env tasks.jsonl --setup --model gpt-4.1 --write ready.jsonl   # 2+3. dete
 Repos that push code and tests in separate commits, with no PRs, are handled by commit windows:
 
 ```bash
-swekit mine ./app -o tasks.jsonl --window 3 --group-by author-day   # code on Monday + tests on Tuesday = one task
+sweforge mine ./app -o tasks.jsonl --window 3 --group-by author-day   # code on Monday + tests on Tuesday = one task
 ```
 
 ### Validate
 
 ```bash
-swekit validate tasks.jsonl -o valid.jsonl --runs 3 --workers 4 --report validation.jsonl
-swekit validate tasks.jsonl -o valid.jsonl --naming invalid       # SWE-bench's rule: reject unspecified new names
+sweforge validate tasks.jsonl -o valid.jsonl --runs 3 --workers 4 --report validation.jsonl
+sweforge validate tasks.jsonl -o valid.jsonl --naming invalid       # SWE-bench's rule: reject unspecified new names
 ```
 
 Each report row holds:
@@ -359,16 +359,16 @@ Each report row holds:
 
 | Mode | Who writes | Command |
 |---|---|---|
-| Draft | Deterministic: interface from the code, requirements from the tests | `swekit spec tasks.jsonl -o s.jsonl` |
-| LLM | A model writes the statement, requirements and descriptions; retried if the leak check fires | `swekit spec tasks.jsonl -o s.jsonl --mode llm --model gpt-4.1` |
-| Custom agent | Any class with `write(task, drafts) -> dict` | `swekit spec tasks.jsonl -o s.jsonl --writer mypkg.writers:Writer` |
-| Human review | People edit one Markdown file per task | `swekit spec-export s.jsonl review/` then `swekit spec-import s.jsonl review/ -o final.jsonl --require-reviewed` |
+| Draft | Deterministic: interface from the code, requirements from the tests | `sweforge spec tasks.jsonl -o s.jsonl` |
+| LLM | A model writes the statement, requirements and descriptions; retried if the leak check fires | `sweforge spec tasks.jsonl -o s.jsonl --mode llm --model gpt-4.1` |
+| Custom agent | Any class with `write(task, drafts) -> dict` | `sweforge spec tasks.jsonl -o s.jsonl --writer mypkg.writers:Writer` |
+| Human review | People edit one Markdown file per task | `sweforge spec-export s.jsonl review/` then `sweforge spec-import s.jsonl review/ -o final.jsonl --require-reviewed` |
 
 Every mode records `metadata.spec.fields_by` (`draft`, `llm:<model>`, `<writer>` or `human:<name>`) and whether a person reviewed the task. LLMs use any OpenAI-compatible endpoint:
 
 ```bash
-export SWEKIT_LLM_API_KEY=...                     # or OPENAI_API_KEY
-swekit spec tasks.jsonl -o s.jsonl --mode llm --model llama3.1 --base-url http://localhost:11434/v1   # e.g. Ollama
+export SWEFORGE_LLM_API_KEY=...                     # or OPENAI_API_KEY
+sweforge spec tasks.jsonl -o s.jsonl --mode llm --model llama3.1 --base-url http://localhost:11434/v1   # e.g. Ollama
 ```
 
 ### Run agents
@@ -388,11 +388,11 @@ The tools run through the harness's sandbox API, so they work in any image and l
 - **Retrieval is separate:** retrieval (`localize`) is the 2023 one-shot baseline, kept to measure localization, not to drive the agent.
 
 ```bash
-swekit run tasks.jsonl --agent llm --model gpt-4.1 --input-price 2 --output-price 8 \
+sweforge run tasks.jsonl --agent llm --model gpt-4.1 --input-price 2 --output-price 8 \
        --max-turns 50 --max-cost 2 --checkpoint-every 5 --grade-checkpoints -o runs/gpt41
-swekit run tasks.jsonl --agent replay:recorded/ -o runs/replay      # one commands file / trajectory per task
-swekit run tasks.jsonl --agent mypkg.agents:MyAgent -o runs/mine    # reset(observation) / act(last_output)
-swekit import-traj sweagent_runs/ --tasks tasks.jsonl --grade -o runs/sweagent
+sweforge run tasks.jsonl --agent replay:recorded/ -o runs/replay      # one commands file / trajectory per task
+sweforge run tasks.jsonl --agent mypkg.agents:MyAgent -o runs/mine    # reset(observation) / act(last_output)
+sweforge import-traj sweagent_runs/ --tasks tasks.jsonl --grade -o runs/sweagent
 ```
 
 `run` writes the following, so the official SWE-bench harness can re-grade the same patches:
@@ -405,9 +405,9 @@ Interrupted batches resume where they stopped.
 ### Grade and report
 
 ```bash
-swekit grade tasks.jsonl predictions.jsonl -o grades.jsonl --workers 4
-swekit report runs/gpt41 runs/mine --tasks tasks.jsonl --md report.md --json report.json
-swekit localize verified.jsonl --budgets 13000,27000,50000 -o loc.jsonl
+sweforge grade tasks.jsonl predictions.jsonl -o grades.jsonl --workers 4
+sweforge report runs/gpt41 runs/mine --tasks tasks.jsonl --md report.md --json report.json
+sweforge localize verified.jsonl --budgets 13000,27000,50000 -o loc.jsonl
 ```
 
 The report contains:
@@ -419,9 +419,9 @@ The report contains:
 ## Use it as an RL environment
 
 ```python
-from swe_env_kit.formats import load_any
-from swe_env_kit.grade import grade
-from swe_env_kit.gym import Budget, SWEEnv
+from swe_env_forge.formats import load_any
+from swe_env_forge.grade import grade
+from swe_env_forge.gym import Budget, SWEEnv
 
 task = load_any("tasks.jsonl")[0]
 with SWEEnv(task, backend="docker", budget=Budget(max_turns=50, max_cost=2.0)) as env:   # offline by default
@@ -497,14 +497,14 @@ Every grade also carries `flags`, `failure` and `reverted_test_files`, so reward
 ## Development
 
 ```bash
-git clone https://github.com/phoenixlibbi/swe-env-kit && cd swe-env-kit
+git clone https://github.com/phoenixlibbi/swe-env-forge && cd swe-env-forge
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest -q                  # ~250 tests, no Docker or network needed (~2 min)
 .venv/bin/pytest -q -m network      # live HuggingFace / GitHub checks
 ```
 
 ```
-swe_env_kit/
+swe_env_forge/
   task.py        Task / EnvSpec schema, JSONL io          mine.py       commit-pair and PR miners
   patches.py     diff parsing, split, stats, definitions  spec.py       interface, requirements, writers, review files
   languages.py   test paths, definitions, error patterns  gym.py        SWEEnv, budgets, episodes, batches

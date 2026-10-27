@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from swe_env_kit.task import EnvSpec, Task, load_tasks, read_jsonl, save_tasks, write_jsonl
+from swe_env_forge.task import EnvSpec, Task, load_tasks, read_jsonl, save_tasks, write_jsonl
 
 
 def make(**kw):

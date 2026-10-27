@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from swe_env_kit.logparsers import PARSERS, is_pass, parse_log
+from swe_env_forge.logparsers import PARSERS, is_pass, parse_log
 
 LOGS = Path(__file__).parent / "fixtures" / "logs"
 

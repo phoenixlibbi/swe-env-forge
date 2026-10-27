@@ -127,7 +127,7 @@ def _table(header: list[str], rows: list[list[Any]]) -> str:
 def to_markdown(reports: list[dict[str, Any]]) -> str:
     """One report, or several side by side (compare agents or budgets)."""
     names = [r.get("name") or (", ".join(r.get("agent", [])) or f"run {i + 1}") for i, r in enumerate(reports)]
-    out = ["# swe-env-kit report", ""]
+    out = ["# swe-env-forge report", ""]
     head = ["metric", *names]
     rows = [["graded episodes", *[r["n"] for r in reports]],
             ["resolved %", *[r["slices"].get("overall", {}).get("all", {}).get("resolved_pct", "n/a") for r in reports]],
