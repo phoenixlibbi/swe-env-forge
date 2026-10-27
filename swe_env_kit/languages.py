@@ -42,6 +42,15 @@ _TEST_FILE_RES = [re.compile(p) for p in (
 )]
 
 
+def is_test_file_name(path: str) -> bool:
+    """True when the file *name* marks a test (``test_x.py``, ``x_test.go``, ``x.spec.ts``, ``FooTests.cs``).
+
+    Stricter than :func:`is_test_path`, which also accepts any file under a ``test/`` directory;
+    that would include framework code such as ``django/test/utils.py``.
+    """
+    return any(r.match(PurePosixPath(path).name) for r in _TEST_FILE_RES)
+
+
 def language_of(path: str) -> str | None:
     return EXTENSIONS.get(PurePosixPath(path).suffix.lower())
 

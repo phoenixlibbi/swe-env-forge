@@ -107,7 +107,20 @@ def test_strict_mode_and_flags():
              "+++ /dev/null\n@@ -1 +0,0 @@\n-x\n"
              "diff --git a/conftest.py b/conftest.py\n--- a/conftest.py\n+++ b/conftest.py\n@@ -1 +1 @@\n-a\n+b\n")
     flags, revert = tamper_flags(patch, {"tests/test_hidden.py"})
-    assert revert == []
+    assert revert == ["tests/test_b.py", "conftest.py"]
     assert "adds_skip_marker:src/a.py" in flags
     assert "deletes_test_file:tests/test_b.py" in flags
     assert "edits_test_config:conftest.py" in flags
+
+
+def test_tamper_flags_respect_source_files_under_test_dirs():
+    patch = ("diff --git a/django/test/utils.py b/django/test/utils.py\n--- a/django/test/utils.py\n"
+             "+++ b/django/test/utils.py\n@@ -1 +1 @@\n-a\n+b\n")
+    assert tamper_flags(patch, set())[1] == ["django/test/utils.py"]
+    assert tamper_flags(patch, set(), {"django/test/utils.py"})[1] == []
+    toml = ('diff --git a/pyproject.toml b/pyproject.toml\n--- a/pyproject.toml\n+++ b/pyproject.toml\n'
+            '@@ -1 +1,2 @@\n x\n+addopts = "-p plug"\n')
+    dep = ('diff --git a/pyproject.toml b/pyproject.toml\n--- a/pyproject.toml\n+++ b/pyproject.toml\n'
+           '@@ -1 +1,2 @@\n x\n+dependencies = ["attrs"]\n')
+    assert tamper_flags(toml, set())[0] == ["edits_test_config:pyproject.toml"]
+    assert tamper_flags(dep, set())[0] == []
