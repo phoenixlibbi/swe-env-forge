@@ -123,3 +123,22 @@ def test_import_traj(pipeline, tmp_path):
 def test_errors_are_reported(tmp_path, capsys):
     assert main(["stats", str(tmp_path / "missing.jsonl")]) == 1
     assert main(["grade", str(tmp_path / "missing.jsonl")]) == 1
+
+
+def test_spec_review_workflow_cli(pipeline, tmp_path):
+    review = tmp_path / "review"
+    assert main(["spec-export", str(pipeline / "spec.jsonl"), str(review)]) == 0
+    files = sorted(review.glob("*.md"))
+    assert len(files) == 4
+    f = files[0]
+    f.write_text(f.read_text().replace("status: draft", "status: reviewed").replace("reviewer:        # your name", "reviewer: QA"))
+    out = tmp_path / "final.jsonl"
+    assert main(["spec-import", str(pipeline / "spec.jsonl"), str(review), "-o", str(out), "--require-reviewed"]) == 0
+    final = load_tasks(out)
+    assert len(final) == 1 and final[0].metadata["spec"]["reviewer"] == "QA"
+
+
+def test_spec_custom_writer_cli(pipeline, tmp_path):
+    out = tmp_path / "w.jsonl"
+    assert main(["spec", str(pipeline / "mined.jsonl"), "-o", str(out), "--writer", "tests.test_spec:MyWriter"]) == 0
+    assert all(t.requirements == "- custom requirement" for t in load_tasks(out))

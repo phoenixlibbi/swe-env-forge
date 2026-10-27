@@ -160,6 +160,18 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def _writer(args):
+    """The author of the Pro-style fields: deterministic drafts, an LLM, or a custom agent."""
+    from .agents import load_agent_class
+    from .spec import LLMWriter
+
+    if args.writer:
+        return load_agent_class(args.writer)()
+    if args.mode == "llm":
+        return LLMWriter(_client(args), max_retries=args.retries)
+    return None
+
+
 def cmd_spec(args) -> int:
     from .spec import augment, leak_check
     from .task import save_tasks, write_jsonl
@@ -178,16 +190,63 @@ def cmd_spec(args) -> int:
     if not args.output:
         log("spec: -o/--output is required unless --check-only")
         return 2
-    client = _client(args) if args.model or os.environ.get("SWEKIT_LLM_MODEL") else None
+    writer = _writer(args)
     reports = []
     for t in tasks:
-        _, rep = augment(t, client, overwrite=args.overwrite)
+        try:
+            _, rep = augment(t, overwrite=args.overwrite, writer=writer)
+        except Exception as exc:  # one failed model call must not lose the batch
+            rep = {"error": f"{type(exc).__name__}: {exc}"}
+            log(f"{t.instance_id}: {rep['error']}")
         reports.append({"instance_id": t.instance_id, **rep})
     save_tasks(args.output, tasks)
     if args.report:
         write_jsonl(args.report, reports)
     leaks = sum(1 for t in tasks if t.metadata.get("spec", {}).get("leak"))
-    log(f"drafted specs for {len(tasks)} tasks -> {args.output}; {leaks} flagged for leaks. Review before use.")
+    who = getattr(writer, "name", "deterministic drafts") if writer else "deterministic drafts"
+    log(f"wrote specs for {len(tasks)} tasks with {who} -> {args.output}; {leaks} flagged for leaks.")
+    log(f"human review: swekit spec-export {args.output} review/  (edit)  swekit spec-import {args.output} review/ -o final.jsonl")
+    return 0
+
+
+def cmd_spec_export(args) -> int:
+    from .spec import export_review_file
+
+    tasks = _load(args.tasks, args)
+    out = Path(args.dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for t in tasks:
+        (out / f"{t.instance_id}.md").write_text(export_review_file(t), encoding="utf-8")
+    log(f"wrote {len(tasks)} review files to {out}. Edit the fields, set 'status: reviewed' and your name, "
+        f"then run: swekit spec-import {args.tasks} {out} -o reviewed.jsonl")
+    return 0
+
+
+def cmd_spec_import(args) -> int:
+    from .spec import import_review_file
+    from .task import save_tasks, write_jsonl
+
+    tasks = _load(args.tasks, args)
+    rows, kept = [], []
+    for t in tasks:
+        f = Path(args.dir) / f"{t.instance_id}.md"
+        if not f.exists():
+            rows.append({"instance_id": t.instance_id, "missing": True})
+            if not args.require_reviewed:
+                kept.append(t)
+            continue
+        r = import_review_file(t, f.read_text(encoding="utf-8"))
+        rows.append(r)
+        leaked = any(v["leaked"] for v in r["leak"].values())
+        log(f"{t.instance_id}: {'reviewed by ' + (r['reviewer'] or '?') if r['reviewed'] else 'not reviewed'}"
+            f"{', changed ' + ','.join(r['changed']) if r['changed'] else ''}{', LEAK' if leaked else ''}")
+        if r["reviewed"] or not args.require_reviewed:
+            kept.append(t)
+    save_tasks(args.output, kept)
+    if args.report:
+        write_jsonl(args.report, rows)
+    reviewed = sum(1 for r in rows if r.get("reviewed"))
+    log(f"{reviewed}/{len(tasks)} reviewed; {len(kept)} tasks -> {args.output}")
     return 0
 
 
@@ -443,15 +502,34 @@ def build_parser() -> argparse.ArgumentParser:
     _add_selection(p)
     p.set_defaults(fn=cmd_stats)
 
-    p = sub.add_parser("spec", help="draft Pro-style interface and requirements; check for leaks")
+    p = sub.add_parser("spec", help="write Pro-style problem statement, requirements and interface; check for leaks")
     p.add_argument("tasks")
     p.add_argument("-o", "--output")
+    p.add_argument("--mode", choices=["draft", "llm"], default="draft",
+                   help="draft: deterministic drafts for human review; llm: a model writes the fields")
+    p.add_argument("--writer", help="custom author: module.path:Class with write(task, drafts) -> dict")
+    p.add_argument("--retries", type=int, default=1, help="llm mode: rewrites allowed when the leak check fires")
     p.add_argument("--overwrite", action="store_true", help="replace existing interface/requirements")
     p.add_argument("--check-only", action="store_true", help="only run the leak check (exit 1 on leaks)")
     p.add_argument("--report")
     _add_selection(p)
     _add_llm(p)
     p.set_defaults(fn=cmd_spec)
+
+    p = sub.add_parser("spec-export", help="write one editable Markdown review file per task (human review)")
+    p.add_argument("tasks")
+    p.add_argument("dir")
+    _add_selection(p)
+    p.set_defaults(fn=cmd_spec_export)
+
+    p = sub.add_parser("spec-import", help="read edited review files back, leak-check them, record the reviewer")
+    p.add_argument("tasks")
+    p.add_argument("dir")
+    p.add_argument("-o", "--output", required=True)
+    p.add_argument("--require-reviewed", action="store_true", help="keep only tasks marked 'status: reviewed'")
+    p.add_argument("--report")
+    _add_selection(p)
+    p.set_defaults(fn=cmd_spec_import)
 
     p = sub.add_parser("env", help="write and/or build Docker environments")
     p.add_argument("tasks")

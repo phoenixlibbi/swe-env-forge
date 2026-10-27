@@ -123,3 +123,78 @@ def test_chat_client_against_local_stub():
         assert c.usage.calls == 1
     finally:
         srv.shutdown()
+
+
+# ------------------------------------------------------------ authoring modes
+import json as _json
+
+from swe_env_kit.spec import LLMWriter, export_review_file, import_review_file
+
+
+class JSONClient:
+    model = "fake-model"
+
+    def __init__(self, replies):
+        self.replies, self.calls = list(replies), []
+
+    def chat(self, messages, **kw):
+        self.calls.append(messages)
+        return self.replies.pop(0), None
+
+
+def test_llm_writer_fills_all_three_fields(demo_tasks):
+    t = copy.deepcopy(demo_tasks["feature"])
+    reply = _json.dumps({"problem_statement": "Owners cannot see which items are running low\n\nShow them.",
+                         "requirements": ["Items at or below the threshold are reported", "Sorted by stock, then name"],
+                         "interface_descriptions": {"low_stock_items": "Returns names of low-stock items."}})
+    client = JSONClient(["```json\n" + reply + "\n```"])
+    t, report = augment(t, writer=LLMWriter(client))
+    assert t.problem_statement.startswith("Owners cannot see")
+    assert t.requirements == "- Items at or below the threshold are reported\n- Sorted by stock, then name"
+    # the code's own docstring wins over the model's description
+    assert "Description: Names of items at or below" in t.interface
+    assert t.metadata["spec"]["mode"] == "llm" and t.metadata["spec"]["fields_by"]["requirements"] == "llm:fake-model"
+    assert report["writer"]["attempts"] == 1
+
+
+def test_llm_writer_retries_when_it_leaks_the_fix(demo_tasks):
+    t = copy.deepcopy(demo_tasks["bulk"])
+    leaky = _json.dumps({"problem_statement": "Do this: return apply_discount(cents * qty, bulk_percent(qty))",
+                         "requirements": []})
+    clean = _json.dumps({"problem_statement": "Large orders should get a tiered discount per line.",
+                         "requirements": ["10+ units of one item get 5% off that line"]})
+    client = JSONClient([leaky, clean])
+    t, report = augment(t, writer=LLMWriter(client))
+    assert report["writer"]["attempts"] == 2 and not t.metadata["spec"]["leak"]
+    assert "copies code from the reference fix" in client.calls[1][-1]["content"]
+
+
+class MyWriter:
+    name = "team-agent"
+
+    def write(self, task, drafts):
+        return {"requirements": "- custom requirement", "problem_statement": "Custom statement"}
+
+
+def test_custom_writer(demo_tasks):
+    t, _ = augment(copy.deepcopy(demo_tasks["fix"]), writer=MyWriter())
+    assert t.requirements == "- custom requirement"
+    assert t.metadata["spec"]["mode"] == "custom" and t.metadata["spec"]["fields_by"]["problem_statement"] == "team-agent"
+
+
+def test_review_file_roundtrip(demo_tasks):
+    t, _ = augment(copy.deepcopy(demo_tasks["feature"]))
+    text = export_review_file(t)
+    assert "status: draft" in text and "### Reference fix" in text
+    edited = (text.replace("status: draft", "status: reviewed")
+                  .replace("reviewer:        # your name", "reviewer: Ayesha")
+                  .replace(t.requirements, "- Items at or below the threshold are listed, lowest stock first."))
+    r = import_review_file(t, edited)
+    assert r["reviewed"] and r["reviewer"] == "Ayesha" and r["changed"] == ["requirements"]
+    assert t.requirements == "- Items at or below the threshold are listed, lowest stock first."
+    assert t.metadata["spec"]["fields_by"]["requirements"] == "human:Ayesha"
+    import pytest as _pytest
+
+    other = copy.deepcopy(demo_tasks["fix"])
+    with _pytest.raises(ValueError):
+        import_review_file(other, edited)

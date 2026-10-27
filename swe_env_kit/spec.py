@@ -193,39 +193,195 @@ def leak_check(text: str, gold_patch: str, n: int = 8, threshold: float = 0.02, 
 
 
 # ------------------------------------------------------------------ augment
-PROBLEM_PROMPT = """You write GitHub-issue style problem statements for software-engineering benchmark tasks.
-Write the issue a user or maintainer would file BEFORE the change existed: the motivation, the current
-behaviour, the expected behaviour and, if useful, steps to reproduce. Do not describe the implementation,
-do not mention file names or functions unless a user would know them, never include code from the fix,
-and do not mention tests. Reply with the issue text only (start with a one-line title)."""
+# Pro's last step was human: experts rewrote each problem statement and wrote the requirements and
+# interface descriptions. Three ways to do that step here:
+#   * human  - spec-export writes one Markdown file per task, people edit it, spec-import reads it back
+#   * llm    - LLMWriter asks a model (any OpenAI-compatible endpoint) to write the fields
+#   * custom - any object with ``write(task, drafts) -> dict`` (``--writer module.path:Class``)
+# Every path runs the same leak check, and records who wrote the text and whether a human reviewed it.
+
+WRITER_PROMPT = """You prepare software-engineering benchmark tasks the way SWE-bench Pro's annotators did.
+You receive a raw task: an original issue or commit message, draft interface items and draft requirements
+extracted automatically, plus the reference fix and the hidden tests for your understanding only.
+
+Write three things for the engineer who will solve the task WITHOUT seeing the fix or the tests:
+1. problem_statement: an issue as a user or maintainer would file it before the change existed. Title on the
+   first line, then motivation, current behaviour, expected behaviour, and steps to reproduce if useful.
+2. requirements: a list of precise, testable behaviours the solution must have. Include exact strings,
+   names, return values or error types when the tests check them verbatim. Describe WHAT, never HOW.
+3. interface_descriptions: for each interface item, one sentence on what it does, its inputs and its output.
+   Keep names, locations and signatures exactly as given.
+
+Rules: never copy code from the reference fix, never describe the implementation, never mention the tests.
+Reply with one JSON object and nothing else:
+{"problem_statement": "...", "requirements": ["...", "..."], "interface_descriptions": {"<name>": "..."}}"""
 
 
-def llm_problem_statement(task: Task, client) -> str:
-    msg = (f"Repository: {task.repo}\n\nOriginal commit message / issue:\n{task.problem_statement}\n\n"
-           f"The change that resolved it (for your understanding only, do not leak it):\n{task.gold_patch[:12000]}\n\n"
-           f"Tests that were added (do not mention them):\n{task.test_patch[:6000]}")
-    text, _usage = client.chat([{"role": "system", "content": PROBLEM_PROMPT}, {"role": "user", "content": msg}])
-    return text.strip()
+def _json_object(text: str) -> dict[str, Any] | None:
+    import json
+
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    candidates = [m.group(1)] if m else []
+    start = text.find("{")
+    if start != -1:
+        candidates.append(text[start:text.rfind("}") + 1])
+    for c in candidates:
+        try:
+            obj = json.loads(c)
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            continue
+    return None
 
 
-def augment(task: Task, client=None, overwrite: bool = False) -> tuple[Task, dict[str, Any]]:
-    """Fill ``interface`` and ``requirements`` drafts (and, with an LLM, the problem statement)."""
-    report: dict[str, Any] = {}
+class LLMWriter:
+    """Writes the human-augmentation fields with a chat model, retrying when the leak check fires."""
+
+    def __init__(self, client, max_retries: int = 1, max_patch_chars: int = 16_000):
+        self.client, self.max_retries, self.max_patch_chars = client, max_retries, max_patch_chars
+        self.name = f"llm:{getattr(client, 'model', '') or 'model'}"
+
+    def write(self, task: Task, drafts: dict[str, Any]) -> dict[str, Any]:
+        import json
+
+        items = drafts.get("interface_items", [])
+        msg = (f"Repository: {task.repo}\n\nOriginal issue / commit message:\n{drafts['original_statement']}\n\n"
+               f"Draft interface items:\n{json.dumps(items, indent=1)}\n\n"
+               f"Draft requirements (from the tests; rewrite them as behaviour):\n{drafts['requirements_draft']}\n\n"
+               f"Reference fix (do not leak):\n{task.gold_patch[:self.max_patch_chars]}\n\n"
+               f"Hidden tests (do not mention):\n{task.test_patch[:self.max_patch_chars // 2]}")
+        messages = [{"role": "system", "content": WRITER_PROMPT}, {"role": "user", "content": msg}]
+        out: dict[str, Any] = {}
+        for attempt in range(self.max_retries + 1):
+            text, _usage = self.client.chat(messages)
+            obj = _json_object(text)
+            if obj is None:  # a model that ignores the format still gives us a problem statement
+                out = {"problem_statement": text.strip()}
+            else:
+                reqs = obj.get("requirements") or []
+                if isinstance(reqs, str):
+                    reqs = [ln.lstrip("-* ").strip() for ln in reqs.splitlines() if ln.strip()]
+                out = {"problem_statement": str(obj.get("problem_statement", "")).strip(),
+                       "requirements": "\n".join(f"- {r.strip()}" for r in reqs if str(r).strip()),
+                       "interface_descriptions": obj.get("interface_descriptions") or {}}
+            out["attempts"] = attempt + 1
+            leaks = [leak_check(out.get(k, ""), task.gold_patch) for k in ("problem_statement", "requirements")]
+            snippets = [sn for lk in leaks if lk.leaked for sn in (lk.copied_lines or lk.snippets)]
+            if not snippets or attempt == self.max_retries:
+                return out
+            messages += [{"role": "assistant", "content": text},
+                         {"role": "user", "content": "Your text copies code from the reference fix:\n"
+                          + "\n".join(f"- {sn}" for sn in snippets[:10])
+                          + "\nRewrite it in plain language without these snippets. Same JSON format."}]
+        return out
+
+
+def drafts_for(task: Task) -> dict[str, Any]:
     items = draft_interface(task)
-    if items and (overwrite or not task.interface):
-        task.interface = render_interface(items)
-    report["interface_items"] = [asdict(i) for i in items]
     req = draft_requirements(task)
-    if (req.checks or req.exact_strings) and (overwrite or not task.requirements):
-        task.requirements = req.render()
-    report["requirements"] = req.to_dict()
-    if client is not None:
-        task.problem_statement = llm_problem_statement(task, client)
-        task.metadata["needs_augmentation"] = False
+    return {"original_statement": task.problem_statement, "interface_items": [asdict(i) for i in items],
+            "requirements_draft": req.render() if (req.checks or req.exact_strings) else "", "_items": items,
+            "_requirements": req}
+
+
+def augment(task: Task, client=None, overwrite: bool = False, writer=None) -> tuple[Task, dict[str, Any]]:
+    """Fill the Pro-style fields of ``task``.
+
+    Without a writer: deterministic drafts (interface from the code, requirements from the
+    tests). With ``writer`` (or ``client``, which is wrapped in :class:`LLMWriter`): the writer
+    produces the final problem statement, requirements and interface descriptions.
+    """
+    if writer is None and client is not None:
+        writer = LLMWriter(client)
+    d = drafts_for(task)
+    items: list[InterfaceItem] = d.pop("_items")
+    req: RequirementsDraft = d.pop("_requirements")
+    report: dict[str, Any] = {"interface_items": d["interface_items"], "requirements": req.to_dict()}
+    fields_by: dict[str, str] = {}
+    if writer is None:
+        if items and (overwrite or not task.interface):
+            task.interface, fields_by["interface"] = render_interface(items), "draft"
+        if d["requirements_draft"] and (overwrite or not task.requirements):
+            task.requirements, fields_by["requirements"] = d["requirements_draft"], "draft"
+        mode = "draft"
+    else:
+        out = writer.write(task, d) or {}
+        name = getattr(writer, "name", type(writer).__name__)
+        descs = out.get("interface_descriptions") or {}
+        for it in items:
+            desc = descs.get(it.name) or descs.get(it.name.split(".")[-1])
+            if desc and not it.description:
+                it.description = str(desc).strip()
+        if items and (overwrite or not task.interface):
+            task.interface, fields_by["interface"] = render_interface(items), name
+        if out.get("interface") and (overwrite or not task.interface):
+            task.interface, fields_by["interface"] = str(out["interface"]), name
+        if out.get("requirements") and (overwrite or not task.requirements or task.requirements.startswith("DRAFT")):
+            task.requirements, fields_by["requirements"] = str(out["requirements"]), name
+        if out.get("problem_statement"):
+            task.problem_statement, fields_by["problem_statement"] = str(out["problem_statement"]), name
+            task.metadata["needs_augmentation"] = False
+        report["writer"] = {"name": name, "attempts": out.get("attempts", 1)}
+        mode = "llm" if isinstance(writer, LLMWriter) else "custom"
     report["leak"] = {
         "problem_statement": leak_check(task.problem_statement, task.gold_patch, allow=task.interface).to_dict(),
         "requirements": leak_check(task.requirements, task.gold_patch, allow=task.interface).to_dict(),
     }
-    task.metadata["spec"] = {"drafted": True, "reviewed": False,
+    task.metadata["spec"] = {"mode": mode, "fields_by": fields_by, "reviewed": False, "reviewer": "",
                              "leak": any(v["leaked"] for v in report["leak"].values())}
     return task, report
+
+
+# ---------------------------------------------------------- human review files
+_FIELDS = (("problem_statement", "Problem statement"), ("requirements", "Requirements"), ("interface", "Interface"))
+_FIELD_RE = re.compile(r"<!-- field: (\w+) -->\n(.*?)\n<!-- end field -->", re.S)
+_META_RE = re.compile(r"<!-- meta\n(.*?)\n-->", re.S)
+
+
+def export_review_file(task: Task) -> str:
+    """One Markdown file a person can edit: the three agent-visible fields, then read-only context."""
+    spec = task.metadata.get("spec", {})
+    meta = "\n".join([f"instance_id: {task.instance_id}", "status: draft    # set to: reviewed",
+                      "reviewer:        # your name", f"written_by: {spec.get('mode', 'original')}"])
+    parts = [f"# Review: {task.instance_id}", "",
+             "Edit only the text between the field markers. Agents will see exactly these three fields.",
+             "Do not copy code from the reference fix and do not mention the tests.", "",
+             f"<!-- meta\n{meta}\n-->", ""]
+    for key, title in _FIELDS:
+        parts += [f"## {title}", "", f"<!-- field: {key} -->", getattr(task, key).strip(), "<!-- end field -->", ""]
+    parts += ["---", "## Context for the reviewer (ignored on import, hidden from agents)", "",
+              "### Reference fix", "", "```diff", task.gold_patch.rstrip(), "```", "",
+              "### Hidden tests", "", "```diff", task.test_patch.rstrip(), "```", ""]
+    if task.fail_to_pass:
+        parts += ["### FAIL_TO_PASS", "", *[f"- `{t}`" for t in task.fail_to_pass], ""]
+    return "\n".join(parts)
+
+
+def import_review_file(task: Task, text: str) -> dict[str, Any]:
+    """Apply an edited review file to ``task``; returns what changed and the leak report."""
+    fields = {k: v.strip() for k, v in _FIELD_RE.findall(text)}
+    meta: dict[str, str] = {}
+    m = _META_RE.search(text)
+    if m:
+        for line in m.group(1).splitlines():
+            key, _, value = line.partition(":")
+            meta[key.strip()] = value.split("#", 1)[0].strip()
+    if meta.get("instance_id") and meta["instance_id"] != task.instance_id:
+        raise ValueError(f"review file is for {meta['instance_id']}, not {task.instance_id}")
+    changed = [k for k, _t in _FIELDS if k in fields and fields[k] != getattr(task, k).strip()]
+    for k in changed:
+        setattr(task, k, fields[k])
+    reviewed = meta.get("status", "").lower() == "reviewed"
+    leak = {k: leak_check(getattr(task, k), task.gold_patch, allow=task.interface).to_dict()
+            for k in ("problem_statement", "requirements")}
+    spec = task.metadata.setdefault("spec", {})
+    spec.update({"reviewed": reviewed, "reviewer": meta.get("reviewer", ""),
+                 "leak": any(v["leaked"] for v in leak.values())})
+    fb = spec.setdefault("fields_by", {})
+    for k in changed:
+        fb[k] = f"human:{meta.get('reviewer') or 'unknown'}"
+    if reviewed:
+        task.metadata["needs_augmentation"] = False
+    return {"instance_id": task.instance_id, "changed": changed, "reviewed": reviewed,
+            "reviewer": meta.get("reviewer", ""), "leak": leak}
