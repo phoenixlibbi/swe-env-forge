@@ -122,9 +122,9 @@ def test_llm_agent_end_to_end(fix_task):
                              "I forgot the format",
                              f"THOUGHT: fix it\n```bash\n{FIX_CMD}\n```",
                              "THOUGHT: done\nSUBMIT"])
-    ep = run_episode(fix_task, LLMAgent(fix_task, client), "local")
+    ep = run_episode(fix_task, LLMAgent(fix_task, client, mode="text"), "local")
     assert ep.grade["resolved"] and ep.exit_reason == "submitted"
-    assert ep.turns == 3 and abs(ep.cost - 0.04) < 1e-9
+    assert ep.turns == 2 and abs(ep.cost - 0.04) < 1e-9  # the malformed reply costs money but not a turn
     assert "<problem_statement>" in client.seen[0][1]
     assert any("def apply_discount" in c for c in client.seen[1])  # observation was fed back
 

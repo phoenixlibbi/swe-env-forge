@@ -15,6 +15,7 @@ from typing import Any
 
 from .llm import ChatClient, LLMError
 from .task import Task
+from .tools import TOOL_SCHEMAS, action_from_tool_call
 
 
 class NopAgent:
@@ -118,14 +119,35 @@ def parse_reply(text: str) -> dict[str, Any]:
     return {"type": "format_error", "thought": thought}
 
 
-class LLMAgent:
-    """A minimal ReAct-style agent: one bash command per turn, ``SUBMIT`` when done."""
+TOOLS_PROMPT = """You are an expert software engineer working autonomously in a sandboxed repository.
+{instructions}
 
-    def __init__(self, task: Task, client: ChatClient, max_format_errors: int = 3, history_chars: int = 400_000):
-        self.task, self.client = task, client
+Work like a careful engineer: explore with search, find_file and str_replace_editor view; reproduce the
+problem; make focused edits with str_replace_editor; run the relevant tests with bash; then call submit.
+Call exactly one tool per step. Long outputs are truncated, so view files in ranges and narrow searches."""
+
+
+class LLMAgent:
+    """A tool-using agent in the style of SWE-agent, for any OpenAI-compatible model.
+
+    * ``mode="tools"`` (default): native function calling with bash, str_replace_editor, search,
+      find_file and submit (see :mod:`swe_env_kit.tools`).
+    * ``mode="text"``: for models without function calling; one ```bash block per reply, or SUBMIT.
+
+    Context management follows SWE-agent: the last ``keep_observations`` tool outputs stay in
+    full and older ones are collapsed to a one-line note, so long episodes do not overflow.
+    """
+
+    def __init__(self, task: Task, client: ChatClient, mode: str = "tools", keep_observations: int = 5,
+                 max_format_errors: int = 3, history_chars: int = 400_000):
+        if mode not in ("tools", "text"):
+            raise ValueError("mode must be 'tools' or 'text'")
+        self.task, self.client, self.mode = task, client, mode
         self.name = f"llm:{client.model}"
-        self.max_format_errors, self.history_chars = max_format_errors, history_chars
-        self.messages: list[dict[str, str]] = []
+        self.keep_observations, self.max_format_errors, self.history_chars = keep_observations, max_format_errors, history_chars
+        self.messages: list[dict[str, Any]] = []
+        self.queue: list[tuple[str, dict[str, Any]]] = []
+        self.pending_id: str | None = None
         self.format_errors = 0
 
     def reset(self, observation: dict[str, Any]) -> None:
@@ -137,31 +159,77 @@ class LLMAgent:
             parts.append(f"<interface>\n{t['interface']}\n</interface>")
         if t.get("hints"):
             parts.append(f"<hints>\n{t['hints']}\n</hints>")
-        self.messages = [{"role": "system", "content": SYSTEM_PROMPT.format(instructions=observation["instructions"])},
+        prompt = TOOLS_PROMPT if self.mode == "tools" else SYSTEM_PROMPT
+        self.messages = [{"role": "system", "content": prompt.format(instructions=observation["instructions"])},
                          {"role": "user", "content": "\n\n".join(parts)}]
-        self.format_errors = 0
+        self.queue, self.pending_id, self.format_errors = [], None, 0
 
-    def _trim(self) -> None:
-        # keep the system prompt and task, drop the oldest exchanges when the history grows too large
-        while sum(len(m["content"]) for m in self.messages) > self.history_chars and len(self.messages) > 4:
-            del self.messages[2:4]
+    # ------------------------------------------------------------ context
+    def _is_observation(self, m: dict[str, Any]) -> bool:
+        return m["role"] == "tool" or (m["role"] == "user" and str(m.get("content", "")).startswith("OUTPUT:"))
 
+    def _collapse(self) -> None:
+        obs = [i for i, m in enumerate(self.messages) if self._is_observation(m)]
+        for i in obs[:-self.keep_observations] if self.keep_observations > 0 else obs:
+            content = str(self.messages[i].get("content", ""))
+            if not content.startswith("[collapsed"):
+                self.messages[i]["content"] = f"[collapsed: old output, {content.count(chr(10)) + 1} lines]"
+        while sum(len(str(m.get("content") or "")) for m in self.messages) > self.history_chars and len(self.messages) > 4:
+            del self.messages[2]
+            while len(self.messages) > 2 and self.messages[2]["role"] == "tool":
+                del self.messages[2]  # never leave a tool result without its call
+
+    # -------------------------------------------------------------- acting
     def act(self, last_output: str | None) -> dict[str, Any]:
         if last_output is not None:
-            self.messages.append({"role": "user", "content": f"OUTPUT:\n{last_output}"})
-        self._trim()
-        text, usage = self.client.chat(self.messages)
-        self.messages.append({"role": "assistant", "content": text})
-        action = parse_reply(text)
-        action["cost"] = usage.cost if usage else 0.0
-        if action["type"] == "format_error":
+            if self.pending_id is not None:
+                self.messages.append({"role": "tool", "tool_call_id": self.pending_id, "content": last_output})
+            else:
+                self.messages.append({"role": "user", "content": f"OUTPUT:\n{last_output}"})
+            self.pending_id = None
+        if self.queue:
+            self.pending_id, action = self.queue.pop(0)
+            return action
+        return self._think()
+
+    def _think(self) -> dict[str, Any]:
+        spent = 0.0  # every model call is paid for, including replies that had to be retried
+        for _ in range(self.max_format_errors + 1):
+            self._collapse()
+            if self.mode == "tools":
+                message, usage = self.client.complete(self.messages, tools=TOOL_SCHEMAS)
+            else:
+                text, usage = self.client.chat(self.messages)
+                message = {"role": "assistant", "content": text}
+            spent += usage.cost if usage else 0.0
+            cost = spent
+            self.messages.append({k: v for k, v in message.items() if k in ("role", "content", "tool_calls")})
+            calls = message.get("tool_calls") or []
+            if calls:
+                for c in calls:
+                    fn = c.get("function") or {}
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        args = None
+                    action = (action_from_tool_call(fn.get("name", ""), args) if isinstance(args, dict)
+                              else {"type": "invalid_tool_arguments", "raw": str(fn.get("arguments"))[:200]})
+                    action["thought"] = (message.get("content") or "").strip()[:2000]
+                    self.queue.append((c.get("id", ""), action))
+                self.pending_id, action = self.queue.pop(0)
+                action["cost"] = cost
+                return action
+            action = parse_reply(message.get("content") or "")
+            action["cost"] = cost
+            if action["type"] != "format_error":
+                return action
             self.format_errors += 1
             if self.format_errors > self.max_format_errors:
-                raise LLMError("too many replies without a bash block or SUBMIT")
-            # a turn is spent; tell the model how to reply
-            return {"type": "bash", "command": "echo 'Reply with THOUGHT and one ```bash block, or SUBMIT.'",
-                    "cost": action["cost"], "thought": action.get("thought", "")}
-        return action
+                break
+            hint = ("Call one of the tools (bash, str_replace_editor, search, find_file) or submit."
+                    if self.mode == "tools" else "Reply with THOUGHT and one ```bash block, or SUBMIT.")
+            self.messages.append({"role": "user", "content": hint})
+        raise LLMError("too many replies without a tool call, bash block or SUBMIT")
 
 
 def load_agent_class(spec: str):

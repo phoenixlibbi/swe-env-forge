@@ -361,7 +361,8 @@ def _agent_factory(args) -> tuple[Callable, str]:
         client_args = args
 
         def llm(t):
-            return LLMAgent(t, _client(client_args))
+            return LLMAgent(t, _client(client_args), mode=client_args.agent_mode,
+                            keep_observations=client_args.keep_observations)
         return llm, f"llm:{args.model or os.environ.get('SWEKIT_LLM_MODEL', '')}"
     cls = load_agent_class(spec)
     return (lambda t: cls(t)), spec
@@ -588,6 +589,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--checkpoint-every", type=int, default=0)
     p.add_argument("--grade-checkpoints", action="store_true")
     p.add_argument("--no-grade", action="store_true")
+    p.add_argument("--agent-mode", choices=["tools", "text"], default="tools",
+                   help="llm agent: native function calling with SWE-agent style tools, or a ```bash block per turn")
+    p.add_argument("--keep-observations", type=int, default=5,
+                   help="llm agent: tool outputs kept in full; older ones are collapsed (SWE-agent style)")
     p.add_argument("--network", action="store_true",
                    help="give agent containers network access (off by default: the fix is one git fetch away)")
     p.add_argument("--lenient", action="store_true", help="see grade --lenient")

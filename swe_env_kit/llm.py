@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -46,7 +47,19 @@ class ChatClient:
     retries: int = 3
     usage: Usage = field(default_factory=Usage)
 
-    def chat(self, messages: list[dict[str, str]], **extra) -> tuple[str, Usage]:
+    def chat(self, messages: list[dict[str, Any]], **extra) -> tuple[str, Usage]:
+        """Plain text completion."""
+        message, usage = self.complete(messages, **extra)
+        return message.get("content") or "", usage
+
+    def complete(self, messages: list[dict[str, Any]], tools: list[dict] | None = None,
+                 **extra) -> tuple[dict[str, Any], Usage]:
+        """Full assistant message (``content`` and, with ``tools``, ``tool_calls``) plus usage."""
+        if tools:
+            extra = {"tools": tools, "tool_choice": "auto", **extra}
+        return self._request(messages, **extra)
+
+    def _request(self, messages: list[dict[str, Any]], **extra) -> tuple[dict[str, Any], Usage]:
         if not self.model:
             raise LLMError("no model set (pass --model or set SWEKIT_LLM_MODEL)")
         body = {"model": self.model, "messages": messages, "temperature": self.temperature,
@@ -78,12 +91,16 @@ class ChatClient:
                     continue
                 raise LLMError(f"connection failed: {exc}") from None
         try:
-            text = data["choices"][0]["message"].get("content") or ""
+            message = dict(data["choices"][0]["message"])
         except (KeyError, IndexError, TypeError):
             raise LLMError(f"unexpected response: {str(data)[:300]}") from None
+        if (data["choices"][0].get("finish_reason") == "length" and not message.get("content")
+                and not message.get("tool_calls")):
+            raise LLMError("the reply was cut off by max_tokens before it said anything")
         u = data.get("usage") or {}
         usage = Usage(prompt_tokens=int(u.get("prompt_tokens", 0)), completion_tokens=int(u.get("completion_tokens", 0)),
                       calls=1)
         usage.cost = (usage.prompt_tokens * self.input_price + usage.completion_tokens * self.output_price) / 1e6
         self.usage.add(usage)
-        return text, usage
+        message.setdefault("role", "assistant")
+        return message, usage
