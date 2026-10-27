@@ -256,6 +256,20 @@ def cmd_env(args) -> int:
 
     tasks = _load(args.tasks, args)
     failed = 0
+    if args.detect:
+        from .envdetect import apply_plan, detect_for_task
+        from .task import save_tasks
+
+        for t in tasks:
+            if t.env.image:
+                log(f"{t.instance_id}: has a prebuilt image; detection skipped")
+                continue
+            plan = detect_for_task(t)
+            apply_plan(t, plan)
+            log(f"{t.instance_id}: {plan.base_image or 'no plan'}; " + "; ".join(plan.evidence[:6]))
+        if args.write:
+            save_tasks(args.write, tasks)
+            log(f"wrote tasks with detected environments to {args.write}")
     for t in tasks:
         if args.dockerfiles:
             out = Path(args.dockerfiles) / t.instance_id
@@ -542,6 +556,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("env", help="write and/or build Docker environments")
     p.add_argument("tasks")
+    p.add_argument("--detect", action="store_true",
+                   help="derive the environment from the repo's CI workflows, version files and manifests")
+    p.add_argument("--write", help="with --detect: save the tasks with their detected environments here")
     p.add_argument("--dockerfiles", help="write Dockerfiles under this directory")
     p.add_argument("--build", action="store_true")
     p.add_argument("--rebuild", action="store_true")

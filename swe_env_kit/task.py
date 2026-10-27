@@ -44,6 +44,9 @@ class EnvSpec:
     # image's repository is at, which must descend from base_commit. Official SWE-bench images add
     # one environment commit on top of the base (e.g. sphinx's tox.ini gets ``pytest -rA``).
     start_ref: str = "base"
+    # Backing services started next to the task container, sharing its network namespace so they
+    # answer on localhost (as GitHub Actions services do): [{"name", "image", "env", "ports", "command"}]
+    services: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "EnvSpec":
