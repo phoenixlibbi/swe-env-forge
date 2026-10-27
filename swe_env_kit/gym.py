@@ -54,7 +54,7 @@ def truncate(text: str, limit: int) -> str:
 
 class SWEEnv:
     def __init__(self, task: Task, backend: str = "docker", budget: Budget | None = None, *,
-                 network: bool = True, checkpoint_every: int = 0, include_hints: bool = False, keep: bool = False):
+                 network: bool = False, checkpoint_every: int = 0, include_hints: bool = False, keep: bool = False):
         self.task, self.backend, self.budget = task, backend, budget or Budget()
         self.network, self.checkpoint_every = network, checkpoint_every
         self.include_hints, self.keep = include_hints, keep
@@ -96,10 +96,13 @@ class SWEEnv:
                             command, "__swekit_rc=$?", f"pwd > {shlex.quote(cwd_file)}", "exit $__swekit_rc"])
         path = f"{sb.scratch}/step.sh"
         sb.write_file(path, script)
-        res = sb.exec(f"bash {path} 2>&1", timeout=self.budget.command_timeout)
+        limit = self.budget.command_timeout
+        if self.budget.max_seconds is not None:  # never run past the episode's wall-clock budget
+            limit = max(1.0, min(limit, self.budget.max_seconds - (time.monotonic() - self.started)))
+        res = sb.exec(f"bash {shlex.quote(path)} 2>&1", timeout=limit)
         out = res.output
         if res.timed_out:
-            out += f"\n[command timed out after {self.budget.command_timeout:.0f}s]"
+            out += f"\n[command timed out after {limit:.0f}s]"
         return truncate(out, self.budget.max_output_chars), res.exit_code, res.duration, res.timed_out
 
     def step(self, action: dict[str, Any]) -> tuple[str, bool, dict[str, Any]]:
@@ -153,7 +156,8 @@ class SWEEnv:
 # --------------------------------------------------------------------- episodes
 def run_episode(task: Task, agent, backend: str = "docker", budget: Budget | None = None, *,
                 out_dir: str | Path | None = None, do_grade: bool = True, grade_checkpoints: bool = False,
-                checkpoint_every: int = 0, network: bool = True, strict: bool = False) -> Episode:
+                checkpoint_every: int = 0, network: bool = False, strict: bool = True,
+                timeout: float | None = None) -> Episode:
     """Run ``agent`` on ``task`` until it submits or a budget runs out, then grade in a fresh sandbox."""
     agent_name = getattr(agent, "name", type(agent).__name__)
     ep = Episode(task.instance_id, agent_name)
@@ -181,13 +185,14 @@ def run_episode(task: Task, agent, backend: str = "docker", budget: Budget | Non
         env.close()
     ep.duration = round(time.monotonic() - start, 2)
     if do_grade and ep.exit_reason != "env_error":
-        ep.grade = grade(task, ep.patch, backend, strict=strict).to_dict()
+        ep.grade = grade(task, ep.patch, backend, strict=strict, timeout=timeout).to_dict()
         if grade_checkpoints:
             cache: dict[str, dict] = {}
             for cp in ep.checkpoints:
                 key = hashlib.sha1(cp.patch.encode()).hexdigest()
                 if key not in cache:
-                    cache[key] = ep.grade if cp.patch == ep.patch else grade(task, cp.patch, backend).to_dict()
+                    cache[key] = ep.grade if cp.patch == ep.patch else grade(
+                        task, cp.patch, backend, strict=strict, timeout=timeout).to_dict()
                 g = cache[key]
                 cp.grade = {"resolved": g["resolved"], "dense": g["dense"], "failure": g["failure"]}
     if out_dir:
@@ -207,7 +212,13 @@ def run_batch(tasks: list[Task], agent_factory: Callable[[Task], Any], backend: 
     results: list[Episode] = []
 
     def one(t: Task) -> Episode:
-        return run_episode(t, agent_factory(t), backend, budget, out_dir=out, **kw)
+        try:
+            agent = agent_factory(t)
+        except Exception as exc:  # e.g. a missing replay file: record it, keep the batch going
+            ep = Episode(t.instance_id, "unknown", exit_reason="agent_error", error=f"{type(exc).__name__}: {exc}")
+            ep.save(out)
+            return ep
+        return run_episode(t, agent, backend, budget, out_dir=out, **kw)
 
     with cf.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for ep in pool.map(one, todo):

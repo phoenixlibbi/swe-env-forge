@@ -228,8 +228,11 @@ def cmd_validate(args) -> int:
         log(f"{t.instance_id}: {res.verdict} f2p={len(res.fail_to_pass)} p2p={len(res.pass_to_pass)} "
             f"{' '.join(res.reasons + res.warnings)}")
         reports.append(res.to_dict())
-        if res.verdict == "valid" or args.keep_invalid:
+        if res.verdict == "valid":
             kept.append(apply_validation(t, res))
+        elif args.keep_invalid:  # keep the task's existing test lists; only record what happened
+            t.metadata["validation"] = {"verdict": res.verdict, "reasons": res.reasons, "warnings": res.warnings}
+            kept.append(t)
     order = {t.instance_id: i for i, t in enumerate(tasks)}
     kept.sort(key=lambda t: order[t.instance_id])
     save_tasks(args.output, kept)
@@ -257,7 +260,7 @@ def cmd_grade(args) -> int:
     todo = [t for t in tasks if t.instance_id in preds]
     missing = len(tasks) - len(todo)
     results = []
-    for t, r in _parallel(todo, lambda t: grade(t, preds[t.instance_id], args.backend, strict=args.strict,
+    for t, r in _parallel(todo, lambda t: grade(t, preds[t.instance_id], args.backend, strict=not args.lenient,
                                                  timeout=args.timeout), args.workers):
         results.append(r.to_dict())
         log(f"{t.instance_id}: {'RESOLVED' if r.resolved else r.failure} dense={r.dense}"
@@ -304,11 +307,15 @@ def cmd_run(args) -> int:
 
     tasks = _load(args.tasks, args)
     factory, name = _agent_factory(args)
+    if args.backend == "local" and args.agent not in ("nop", "oracle") and not args.agent.startswith("replay:"):
+        log("warning: --backend local gives the agent your whole machine (and the task file and repo cache, "
+            "which contain the answers). Use --backend docker for real agents.")
     budget = Budget(max_turns=args.max_turns, max_cost=args.max_cost, max_seconds=args.max_seconds,
                     command_timeout=args.command_timeout, max_output_chars=args.max_output_chars)
     eps = run_batch(tasks, factory, args.backend, budget=budget, out_dir=args.output, workers=args.workers,
                     model_name=name, do_grade=not args.no_grade, grade_checkpoints=args.grade_checkpoints,
-                    checkpoint_every=args.checkpoint_every, network=not args.no_network, strict=args.strict)
+                    checkpoint_every=args.checkpoint_every, network=args.network, strict=not args.lenient,
+                    timeout=args.timeout)
     for ep in eps:
         g = ep.grade or {}
         log(f"{ep.instance_id}: {ep.exit_reason} turns={ep.turns} cost=${ep.cost:.4f} "
@@ -476,7 +483,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend", choices=["docker", "local"], default="docker")
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--timeout", type=float)
-    p.add_argument("--strict", action="store_true", help="tampering (skip markers, test config edits) fails the task")
+    p.add_argument("--lenient", action="store_true",
+                   help="only flag (do not fail) skip markers and test-setting edits; test files are reverted either way")
     _add_selection(p)
     p.set_defaults(fn=cmd_grade)
 
@@ -494,8 +502,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--checkpoint-every", type=int, default=0)
     p.add_argument("--grade-checkpoints", action="store_true")
     p.add_argument("--no-grade", action="store_true")
-    p.add_argument("--no-network", action="store_true", help="agent containers get no network")
-    p.add_argument("--strict", action="store_true")
+    p.add_argument("--network", action="store_true",
+                   help="give agent containers network access (off by default: the fix is one git fetch away)")
+    p.add_argument("--lenient", action="store_true", help="see grade --lenient")
+    p.add_argument("--timeout", type=float, help="test timeout when grading (default: the task's env.timeout)")
     _add_selection(p)
     _add_llm(p)
     p.set_defaults(fn=cmd_run)

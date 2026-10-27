@@ -50,7 +50,13 @@ class ValidationResult:
 
 
 def combine(runs: list[TestRun]) -> dict[str, str]:
-    """Merge several runs into PASS / FAIL / FLAKY per test (missing in a run counts as FAIL)."""
+    """Merge several runs into PASS / FAIL / FLAKY per test (missing in a run counts as FAIL).
+
+    Runs that produced no results at all (a crash or timeout) are ignored when another run
+    did produce results, so one crash does not turn every test into FLAKY.
+    """
+    parsed = [r for r in runs if r.parsed]
+    runs = parsed or runs
     names = set().union(*(r.statuses for r in runs)) if runs else set()
     out = {}
     for n in names:
@@ -66,7 +72,8 @@ def classify(pre: dict[str, str], post: dict[str, str]) -> dict[str, list[str]]:
         if FLAKY in (a, b):
             groups["flaky"].append(name)
         elif b == MISSING:
-            continue  # only seen before the fix (e.g. a test the gold patch removes)
+            if a == PASS:  # passed before the fix, gone after it: the gold patch broke it
+                groups["p2f"].append(name)
         elif a == FAIL and b == PASS:
             groups["f2p"].append(name)
         elif a == PASS and b == PASS:
@@ -85,13 +92,35 @@ def _counts(combined: dict[str, str]) -> dict[str, int]:
     return c
 
 
-def naming_errors(task: Task, pre_logs: list[str]) -> list[dict[str, str]]:
-    """Missing-symbol errors before the fix whose symbol the agent-visible text never names."""
+_BUILTIN_OWNERS = re.compile(r"'(?:NoneType|list|dict|str|int|float|tuple|set|bool|bytes)' object has no attribute")
+
+
+def symbol_leaf(sym: str) -> str:
+    """The name a reader would recognise: ``pkg.mod.func`` -> ``func``, ``./lib/helper.js`` -> ``helper``."""
+    if "/" in sym or "\\" in sym:
+        base = re.split(r"[/\\]+", sym.rstrip("/\\"))[-1]
+        return re.sub(r"\.[A-Za-z0-9]+$", "", base) or base
+    return re.split(r"[.:]+", sym)[-1] or sym
+
+
+def naming_errors(task: Task, pre_logs: list[str], post_logs: list[str] | None = None) -> list[dict[str, str]]:
+    """Missing-symbol errors that appear before the fix but not after it, i.e. names the fix creates.
+
+    Each is marked ``specified`` when the agent-visible text (statement, requirements,
+    interface) mentions it. AttributeErrors on built-in values (``'NoneType' object has no
+    attribute ...``) are symptoms of the bug, not missing names, and are ignored.
+    """
     visible = "\n".join([task.problem_statement, task.requirements, task.interface])
+    after = {(k, s) for log in (post_logs or []) for k, s in missing_symbols(log)}
     out, seen = [], set()
     for log in pre_logs:
+        builtin_attr = {m.group(0) for m in re.finditer(_BUILTIN_OWNERS.pattern + r" '(\w+)'", log)}
         for kind, sym in missing_symbols(log):
-            leaf = re.split(r"[.:\\/]+", sym)[-1] or sym
+            if (kind, sym) in after:
+                continue
+            if kind == "python-attribute" and any(f"'{sym}'" in b for b in builtin_attr):
+                continue
+            leaf = symbol_leaf(sym)
             if (kind, leaf) in seen:
                 continue
             seen.add((kind, leaf))
@@ -131,7 +160,10 @@ def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = 
     groups = classify(pre, post)
     res.fail_to_pass, res.pass_to_pass = groups["f2p"], groups["p2p"]
     res.pass_to_fail, res.fail_to_fail, res.flaky = groups["p2f"], groups["f2f"], groups["flaky"]
-    res.naming_errors = naming_errors(task, [r.log for r in pre_runs])
+    res.naming_errors = naming_errors(task, [r.log for r in pre_runs], [r.log for r in post_runs])
+    crashed = [i for i, r in enumerate(post_runs) if not r.parsed]
+    if crashed and len(crashed) < len(post_runs):
+        res.warnings.append(f"post_runs_without_results:{len(crashed)}")
     res.duration = round(res.duration, 2)
 
     if not any(r.parsed for r in post_runs):
