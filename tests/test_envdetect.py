@@ -143,8 +143,7 @@ def test_local_backend_refuses_tasks_with_services():
     from swe_env_kit.sandbox import SandboxError
     from swe_env_kit.workspace import open_sandbox
 
-    t = Task(instance_id="i", repo="o/r", base_commit="b", env={"services": [{"name": "db", "image": "postgres:16"}]}) \
-        if False else Task.from_dict({"instance_id": "i", "repo": "o/r", "base_commit": "b",
-                                       "env": {"services": [{"name": "db", "image": "postgres:16", "ports": [5432]}]}})
+    t = Task.from_dict({"instance_id": "i", "repo": "o/r", "base_commit": "b",
+                        "env": {"services": [{"name": "db", "image": "postgres:16", "ports": [5432]}]}})
     with pytest.raises(SandboxError, match="needs services"):
         open_sandbox(t, "local")
