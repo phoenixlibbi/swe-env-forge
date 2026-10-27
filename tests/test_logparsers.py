@@ -98,3 +98,8 @@ def test_unknown_parser():
 def test_is_pass():
     assert is_pass("PASSED") and is_pass("XFAIL")
     assert not is_pass("FAILED") and not is_pass(None) and not is_pass("SKIPPED")
+
+
+def test_cargo_short_names():
+    out = parse_log((LOGS / "cargo.log").read_text(), "cargo-short")
+    assert out["totals"] == "PASSED" and out["discounts"] == "FAILED"

@@ -315,6 +315,12 @@ def parse_cargo(log: str) -> dict[str, str]:
     return out
 
 
+@register("cargo-short")
+def parse_cargo_short(log: str) -> dict[str, str]:
+    """Like ``cargo`` but names are the last path segment (``tests::totals`` -> ``totals``)."""
+    return {name.rsplit("::", 1)[-1]: st for name, st in parse_cargo(log).items()}
+
+
 # ------------------------------------------------------------ xml: junit / trx
 def _xml_docs(log: str) -> list[ET.Element]:
     docs = []

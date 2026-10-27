@@ -77,6 +77,29 @@ def _first(row: dict, keys: Iterable[str], default: Any = "") -> Any:
     return default
 
 
+# SWE-bench "specs" dictionaries (``MAP_REPO_VERSION_TO_SPECS`` style) found in many derived datasets.
+_SPEC_PARSERS = {"pytest": "pytest", "pytest_v2": "pytest-v2", "django": "django", "sympy": "sympy",
+                 "cargo": "cargo", "go": "go", "gotest": "go", "go_test": "go", "jest": "jest", "vitest": "jest",
+                 "mocha": "mocha", "junit": "junit", "maven": "junit", "gradle": "junit", "dotnet": "dotnet",
+                 "trx": "trx", "rspec": "rspec", "minitest": "minitest", "tap": "tap", "gtest": "gtest",
+                 "phpunit": "junit"}
+
+
+def _specs(row: dict[str, Any]) -> dict[str, Any]:
+    spec = row.get("spec_dict", row.get("specs"))
+    if isinstance(spec, str):
+        try:
+            import ast
+
+            spec = ast.literal_eval(spec)
+        except (ValueError, SyntaxError):
+            try:
+                spec = json.loads(spec)
+            except json.JSONDecodeError:
+                spec = None
+    return spec if isinstance(spec, dict) else {}
+
+
 def from_generic(row: dict[str, Any]) -> Task:
     """Best-effort mapping for SWE-style rows with their own column names."""
     iid = _first(row, ("instance_id", "task_id", "id"))
@@ -88,17 +111,24 @@ def from_generic(row: dict[str, Any]) -> Task:
     tests = _first(row, _ALIASES["test_patch"])
     lang = str(_first(row, _ALIASES["language"])).strip().lower()
     lang = _LANG_NAMES.get(lang, lang) or detect_language(files_in(gold) + files_in(tests))
+    spec = _specs(row)
+    test_cmd = _first(row, ("test_command", "test_cmd", "eval_command"), None) or spec.get("test_cmd")
+    if isinstance(test_cmd, list):
+        test_cmd = " && ".join(test_cmd)
+    pre = [*_as_list(spec.get("pre_install")), *_as_list(spec.get("eval_commands"))]
+    parser = _first(row, ("log_parser",), None) or _SPEC_PARSERS.get(str(spec.get("log_parser_name", "")).lower(), "auto")
     env = EnvSpec(
         image=_first(row, ("image", "docker_image", "image_name"), None),
         dockerfile=_first(row, ("dockerfile",), None),
         workdir=_first(row, ("workdir",), "/testbed"),
-        test_command=_first(row, ("test_command", "test_cmd", "eval_command"), None),
-        log_parser=_first(row, ("log_parser",), "auto"),
-        test_file_format="none" if _first(row, ("test_command", "test_cmd"), None) else "path",
+        test_command=test_cmd,
+        pre_test=[c for c in pre if c and not c.lstrip().startswith("#")],
+        log_parser=parser,
+        test_file_format="none" if test_cmd else "path",
     )
     used = {"instance_id", "task_id", "id", "repo", "repository", "repo_name", "base_commit", "base_sha", "base",
             "image", "docker_image", "image_name", "dockerfile", "workdir", "test_command", "test_cmd",
-            "eval_command", "log_parser", *[k for ks in _ALIASES.values() for k in ks]}
+            "eval_command", "log_parser", "spec_dict", "specs", *[k for ks in _ALIASES.values() for k in ks]}
     meta = {k: v for k, v in row.items() if k not in used}
     return Task(
         instance_id=str(iid), repo=str(repo), base_commit=str(base),

@@ -29,8 +29,12 @@ def _select(tasks: list, ids: str | None = None, limit: int | None = None, langu
 def _load(path: str, args) -> list:
     from .formats import load_any
 
-    return _select(load_any(path, getattr(args, "format", "auto")), getattr(args, "ids", None),
-                   getattr(args, "limit", None), getattr(args, "language", None))
+    tasks = _select(load_any(path, getattr(args, "format", "auto")), getattr(args, "ids", None),
+                    getattr(args, "limit", None), getattr(args, "language", None))
+    if getattr(args, "log_parser", None):
+        for t in tasks:
+            t.env.log_parser = args.log_parser
+    return tasks
 
 
 def _parallel(items: list, fn: Callable[[Any], Any], workers: int) -> Iterable[tuple[Any, Any]]:
@@ -53,6 +57,7 @@ def _add_selection(p: argparse.ArgumentParser) -> None:
     p.add_argument("--ids", help="comma-separated instance ids to keep")
     p.add_argument("--limit", type=int, help="keep the first N tasks")
     p.add_argument("--language", help="keep tasks of one language")
+    p.add_argument("--log-parser", help="override every task's log parser (see swe_env_kit.logparsers)")
 
 
 def _add_llm(p: argparse.ArgumentParser) -> None:

@@ -160,3 +160,13 @@ def test_live_pro_scripts():
     row = next(hub.iter_hf_rows("swebench-pro", limit=1))
     scripts = hub.fetch_pro_scripts(row["instance_id"])
     assert "run_selected_tests" in scripts["run_script"] and "parse_test_output" in scripts["parser_script"]
+
+
+def test_generic_rows_with_swebench_style_specs():
+    row = {"instance_id": "o__r-1", "repo": "o/r", "base_commit": "c", "language": "Rust",
+           "spec_dict": "{'build': ['cargo build'], 'test_cmd': 'cargo test', 'pre_install': ['# note', 'echo hi'],"
+                        " 'log_parser_name': 'cargo'}"}
+    t = from_generic(row)
+    assert t.env.test_command == "cargo test" and t.env.log_parser == "cargo"
+    assert t.env.pre_test == ["echo hi"] and t.env.test_file_format == "none"
+    assert "spec_dict" not in t.metadata
