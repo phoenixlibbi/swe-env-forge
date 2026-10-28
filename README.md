@@ -30,12 +30,15 @@
 | `sweforge fetch` / `convert` | Download SWE-bench, Lite, Verified or Pro from HuggingFace; convert between swe-env-forge, SWE-bench, Pro and generic rows | no / no |
 | `sweforge mine` | Turn git history into candidate tasks: merged PRs that close an issue (SWE-bench), consecutive commit pairs (Pro, works on private repos), or commit windows for repos that push code and tests separately | no / no |
 | `sweforge stats` | Fix size, "trivial 1–2 line" tasks, Pro eligibility, static naming leaks, license class | no / no |
+| `sweforge dedup` | Exact and near-duplicate tasks (normalized diffs, line shingles), within a set or `--against` another dataset such as public SWE-bench | no / no |
+| `sweforge scan` | Secrets (cloud keys, tokens, private keys, high-entropy credentials) and personal data (emails, sign-off trailers); blocks or `--redact`s | no / no |
 | `sweforge spec` | Write the Pro-style problem statement, requirements and interface: deterministic drafts, an LLM writer, or your own agent; leak check | no / optional |
 | `sweforge spec-export` / `spec-import` | Human review: one editable Markdown file per task; records who wrote and reviewed every field | no / no |
 | `sweforge env` | Build each task's environment. `--detect` reads the repo's CI workflows, version files and manifests (and its backing services). `--setup` adds an agent that builds, validates and repairs the environment until the task validates | yes / optional |
 | `sweforge validate` | Run the tests before and after the reference fix N times, plus once at the base without the new tests: FAIL_TO_PASS, PASS_TO_PASS, flaky tests, tests the fix breaks, naming leaks, F2P tests that only failed to import, missing dependencies | yes (or `--backend local`) / no |
 | `sweforge run` | Run an agent in a gym with SWE-agent style tools (bash, `str_replace_editor`, search, find_file), turn / cost / time budgets and checkpoint grading. Agents: nop, oracle, replay, a tool-calling LLM agent, or your class | yes / optional |
 | `sweforge grade` | Grade patches (SWE-bench predictions format) with a tamper guard; binary + dense reward; CI gate with `--expect` | yes / no |
+| `sweforge cleanup` | Remove containers left by interrupted runs (only this tool's, by label) | yes / no |
 | `sweforge import-traj` | Import SWE-agent `.traj` files so existing runs can be graded, reported and failure-classified | optional / no |
 | `sweforge report` | Resolve rate by language, fix size and file count; budget curves; failure modes; compare runs side by side | no / no |
 | `sweforge localize` | BM25 vs oracle file retrieval at 13k / 27k / 50k token budgets (SWE-bench's Table 3) | no / no |
@@ -93,6 +96,8 @@ sweforge report runs/mine --tasks pro.jsonl --md report.md       # by language /
 sweforge grade tasks.jsonl --gold --expect resolved      # the reference fix must pass
 sweforge grade tasks.jsonl --nop  --expect unresolved    # doing nothing must fail
 sweforge spec tasks.jsonl --check-only                   # no field may copy code from the fix
+sweforge scan tasks.jsonl                                # no secrets or personal data in any field
+sweforge dedup tasks.jsonl --against verified.jsonl      # not a copy of a public benchmark task
 ```
 
 ### Use in CI
@@ -394,6 +399,8 @@ sweforge run tasks.jsonl --agent replay:recorded/ -o runs/replay      # one comm
 sweforge run tasks.jsonl --agent mypkg.agents:MyAgent -o runs/mine    # reset(observation) / act(last_output)
 sweforge import-traj sweagent_runs/ --tasks tasks.jsonl --grade -o runs/sweagent
 ```
+
+`--samples k` runs every task k times (folders `<id>@1 … @k`), which gives unbiased pass@k in the report and the per-task groups that GRPO/RLOO-style training needs. In Python, `SWEEnv(..., grade_on_done=True)` returns the reward in `info` on the final step, and each episode saves the exact messages the model saw (`messages.json`).
 
 `run` writes the following, so the official SWE-bench harness can re-grade the same patches:
 - one folder per task (`trajectory.jsonl`, `episode.json`, `patch.diff`)
