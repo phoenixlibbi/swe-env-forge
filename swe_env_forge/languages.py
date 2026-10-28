@@ -213,6 +213,18 @@ def missing_symbols(log: str) -> list[tuple[str, str]]:
     return list(seen)
 
 
+NETWORK_ERROR_RE = re.compile(
+    r"Could not resolve host|Temporary failure in name resolution|Name or service not known|"
+    r"getaddrinfo (?:ENOTFOUND|EAI_AGAIN)|Network is unreachable|nodename nor servname|"
+    r"Failed to establish a new connection|Unable to load the service index for source|"
+    r"dial tcp: lookup .* no such host|No route to host")
+
+
+def needs_network(log: str) -> bool:
+    """The test run tried to reach the internet (and failed): the environment lacks a dependency offline."""
+    return bool(NETWORK_ERROR_RE.search(log))
+
+
 # -------------------------------------------------------------- skip markers
 SKIP_MARKER_RE = re.compile(
     r"@pytest\.mark\.(?:skip|skipif|xfail)\b|@unittest\.skip|\bpytest\.skip\(|\bself\.skipTest\("

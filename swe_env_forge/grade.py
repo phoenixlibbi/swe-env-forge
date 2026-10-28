@@ -8,7 +8,7 @@ import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .languages import adds_skip_marker, is_test_file_name
+from .languages import adds_skip_marker, is_test_file_name, needs_network
 from .logparsers import conflicting_tests
 from .logparsers import is_pass
 from .patches import parse_patch
@@ -231,6 +231,8 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
     if not run.parsed:
         # e.g. compile errors, or a config edit that stops the runner; keep "empty_patch" when it applies
         r.failure = "tampering" if tampered else (r.failure or "tests_not_run")
+        if not task.env.test_network and needs_network(run.log):
+            r.flags.append("environment_needs_network")   # the image lacks a dependency for offline tests
         return r
     s = score(task, run.statuses, conflicted)
     for k, v in s.items():

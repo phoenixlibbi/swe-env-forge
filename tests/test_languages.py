@@ -83,3 +83,12 @@ def test_skip_markers(line):
 def test_not_skip_markers():
     assert not adds_skip_marker("skipped = compute()")
     assert not adds_skip_marker("def skip_header(self):")
+
+
+def test_network_failures_are_recognised():
+    from swe_env_forge.languages import needs_network
+
+    assert needs_network("error: failed to download\n  [6] Could not resolve hostname (Could not resolve host: static.crates.io)")
+    assert needs_network("npm ERR! getaddrinfo ENOTFOUND registry.npmjs.org")
+    assert needs_network("error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.")
+    assert not needs_network("AssertionError: expected 1 got 2")

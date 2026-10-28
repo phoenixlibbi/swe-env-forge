@@ -14,7 +14,7 @@ import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .languages import missing_symbols
+from .languages import missing_symbols, needs_network
 from .logparsers import is_pass
 from .sandbox import Sandbox
 from .stats import mentioned
@@ -274,8 +274,10 @@ def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = 
 
     # Names still missing after the fix are not the task's fault: the environment lacks a dependency.
     env_missing = sorted({s for r in post_runs for k, s in missing_symbols(r.log) if k in _ENV_MISSING_KINDS})
+    offline_failure = not task.env.test_network and any(needs_network(r.log) for r in post_runs)
     if not any(r.parsed for r in post_runs):
-        res.reasons.append(f"environment_incomplete:{','.join(env_missing)}" if env_missing else "no_tests_parsed")
+        res.reasons.append("environment_needs_network" if offline_failure
+                           else f"environment_incomplete:{','.join(env_missing)}" if env_missing else "no_tests_parsed")
     elif not res.fail_to_pass:
         res.reasons.append(f"environment_incomplete:{','.join(env_missing)}" if env_missing else "no_fail_to_pass")
     elif env_missing:
