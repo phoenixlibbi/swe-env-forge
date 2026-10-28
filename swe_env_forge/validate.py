@@ -9,10 +9,11 @@ agrees; otherwise it is FLAKY and excluded from FAIL_TO_PASS / PASS_TO_PASS.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shlex
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from .languages import missing_symbols, needs_network
 from .logparsers import is_pass
@@ -209,44 +210,65 @@ def _test_name_matches(test_id: str, names: set[str]) -> bool:
 _ENV_MISSING_KINDS = ("python-module", "js-module", "ruby-load", "c-missing-header", "ts-TS2307")
 
 
+@contextlib.contextmanager
+def _run_box(sb: Sandbox, fresh: Callable[[], Sandbox] | None):
+    """The sandbox for one run: a brand-new one when ``fresh`` is given, else the shared ``sb``."""
+    if fresh is None:
+        yield sb
+        return
+    box = fresh()
+    try:
+        yield box
+    finally:
+        box.close()
+
+
 def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = None,
-                naming: str = "warn", base_run: bool = True) -> ValidationResult:
+                naming: str = "warn", base_run: bool = True,
+                fresh: Callable[[], Sandbox] | None = None) -> ValidationResult:
     """Run the pre/post checks in ``sb``. ``naming="invalid"`` applies SWE-bench's rule and rejects
-    tasks whose tests need unspecified new names; the default only warns (Pro's interface fixes it)."""
+    tasks whose tests need unspecified new names; the default only warns (Pro's interface fixes it).
+
+    With ``fresh`` (a sandbox factory) every run gets its own sandbox, so build outputs and caches
+    that survive ``git clean`` (ignored files) cannot leak from one run into the next."""
     res = ValidationResult(task.instance_id, runs=runs)
     pre_runs: list[TestRun] = []
     post_runs: list[TestRun] = []
     changed_fns: dict[str, set[str]] | None = None
     for phase, with_gold in (("pre", False), ("post", True)):
         for i in range(runs):
-            checkout_base(sb, task)
-            if with_gold:
-                gold = apply_patch(sb, task.gold_patch, "gold", reset_to=start_ref(sb, task))
-                if not gold.ok:
-                    res.reasons.append("gold_apply_error")
-                    res.log_tails["gold_apply"] = gold.output[-3000:]
+            with _run_box(sb, fresh) as box:
+                checkout_base(box, task)
+                if with_gold:
+                    gold = apply_patch(box, task.gold_patch, "gold", reset_to=start_ref(box, task))
+                    if not gold.ok:
+                        res.reasons.append("gold_apply_error")
+                        res.log_tails["gold_apply"] = gold.output[-3000:]
+                        return res
+                tp = apply_patch(box, task.test_patch, "tests", reset_to=None if with_gold else start_ref(box, task))
+                if not tp.ok:
+                    res.reasons.append("test_patch_apply_error")
+                    res.log_tails["test_patch_apply"] = tp.output[-3000:]
                     return res
-            tp = apply_patch(sb, task.test_patch, "tests", reset_to=None if with_gold else start_ref(sb, task))
-            if not tp.ok:
-                res.reasons.append("test_patch_apply_error")
-                res.log_tails["test_patch_apply"] = tp.output[-3000:]
-                return res
-            if with_gold and i == 0 and base_run:
-                changed_fns = changed_test_functions(sb, task)
-            run = run_tests(sb, task, timeout=timeout, label=f"{phase}{i}")
-            res.duration += run.duration
-            (post_runs if with_gold else pre_runs).append(run)
-            res.log_tails[f"{phase}{i}"] = run.log[-4000:]
-            if run.timed_out:
-                res.warnings.append(f"{phase}{i}_timed_out")
+                if with_gold and i == 0 and base_run:
+                    changed_fns = changed_test_functions(box, task)
+                run = run_tests(box, task, timeout=timeout, label=f"{phase}{i}")
+                res.duration += run.duration
+                (post_runs if with_gold else pre_runs).append(run)
+                res.log_tails[f"{phase}{i}"] = run.log[-4000:]
+                if run.timed_out:
+                    res.warnings.append(f"{phase}{i}_timed_out")
     pre, post = combine(pre_runs), combine(post_runs)
     res.pre_counts, res.post_counts = _counts(pre), _counts(post)
     groups = classify(pre, post)
     # A test can "fail" before the fix only because the new test patch stops its file from importing
     # (it needs a name the fix creates). If it passed at the start commit with the old test files, it is
     # really pass-to-pass: counting it as F2P would hand out reward for merely defining that name.
-    if base_run and groups["f2p"]:
-        base = _base_run(sb, task, timeout)
+    # Only where we can tell which tests the test patch changed (Python today): elsewhere a modified
+    # test that passed in its old form would be wrongly moved to P2P, so nothing is unmasked.
+    if base_run and groups["f2p"] and changed_fns is not None:
+        with _run_box(sb, fresh) as box:
+            base = _base_run(box, task, timeout)
         if base is not None and base.parsed:
             res.log_tails["base"] = base.log[-4000:]
             all_changed = set().union(*changed_fns.values()) if changed_fns else set()
@@ -293,10 +315,13 @@ def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = 
 
 
 def validate(task: Task, backend: str = "docker", runs: int = 2, timeout: float | None = None,
-             keep: bool = False, naming: str = "warn", base_run: bool = True) -> ValidationResult:
+             keep: bool = False, naming: str = "warn", base_run: bool = True,
+             isolate: bool = True) -> ValidationResult:
+    """Validate ``task``; with ``isolate`` (the default) every run happens in a fresh sandbox."""
     try:
         with open_sandbox(task, backend, keep=keep) as sb:
-            return validate_in(sb, task, runs=runs, timeout=timeout, naming=naming, base_run=base_run)
+            fresh = (lambda: open_sandbox(task, backend, keep=keep)) if isolate else None
+            return validate_in(sb, task, runs=runs, timeout=timeout, naming=naming, base_run=base_run, fresh=fresh)
     except Exception as exc:
         return ValidationResult(task.instance_id, verdict="error", reasons=[f"{type(exc).__name__}: {exc}"])
 
