@@ -147,3 +147,30 @@ def test_local_backend_refuses_tasks_with_services():
                         "env": {"services": [{"name": "db", "image": "postgres:16", "ports": [5432]}]}})
     with pytest.raises(SandboxError, match="needs services"):
         open_sandbox(t, "local")
+
+
+def test_pyproject_is_read_without_tomllib(tmp_path, monkeypatch):
+    """Python 3.10 has no tomllib: the fallback reader must give the same plan."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_tomllib(name, *args, **kwargs):
+        if name == "tomllib":
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_tomllib)
+    test_detect_python_repo_with_services(tmp_path)
+
+
+def test_toml_subset_matches_tomllib():
+    tomllib = pytest.importorskip("tomllib")
+    from swe_env_forge.envdetect import _toml_subset
+
+    text = ("[project]\nname = 'demo'  # comment\nrequires-python = \">=3.10,<3.13\"\n"
+            "dependencies = [\n  \"attrs>=21\",  # why\n  'click',\n]\n"
+            "[project.optional-dependencies]\ndev = [\"pytest\", \"freezegun[x]>=1.0\"]\n"
+            "[dependency-groups]\ntest = [\"pytest>=8\", {include-group = \"lint\"}]\nlint = [\"ruff\"]\n"
+            "[tool.pytest.ini_options]\naddopts = \"-ra -q\"\nxfail_strict = true\ntimeout = 30\n")
+    assert _toml_subset(text) == tomllib.loads(text)

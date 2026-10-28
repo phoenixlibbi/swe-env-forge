@@ -220,12 +220,83 @@ _TEST_REQ_FILES = ("requirements/tests.txt", "requirements/test.txt", "requireme
 def _py_toml(text: str) -> dict:
     try:
         import tomllib  # Python 3.11+
-    except ImportError:  # pragma: no cover
-        return {}
+    except ImportError:
+        return _toml_subset(text)
     try:
         return tomllib.loads(text)
     except Exception:
         return {}
+
+
+_TOML_TOKEN = re.compile(r'''\s*(?:#[^\n]*\n\s*)*("(?:\\.|[^"\\])*"|'[^']*'|[\[\]{},=]|[^\s\[\]{},=#]+)''')
+
+
+def _toml_subset(text: str) -> dict:
+    """The part of TOML that ``pyproject.toml`` detection needs, for Python 3.10 (no ``tomllib``):
+    tables, dotted table names, strings, numbers, booleans, arrays and inline tables. Anything it
+    can't read is skipped, never guessed."""
+    root: dict = {}
+    cur = root
+
+    def value(tokens: list[str], i: int):
+        t = tokens[i]
+        if t == "[":
+            out, i = [], i + 1
+            while tokens[i] != "]":
+                if tokens[i] == ",":
+                    i += 1
+                    continue
+                v, i = value(tokens, i)
+                out.append(v)
+            return out, i + 1
+        if t == "{":
+            out, i = {}, i + 1
+            while tokens[i] != "}":
+                if tokens[i] == ",":
+                    i += 1
+                    continue
+                k = tokens[i].strip("\"'")
+                v, i = value(tokens, i + 2)
+                out[k] = v
+            return out, i + 1
+        if t[:1] == '"':
+            return bytes(t[1:-1], "utf-8").decode("unicode_escape"), i + 1
+        if t[:1] == "'":
+            return t[1:-1], i + 1
+        if t in ("true", "false"):
+            return t == "true", i + 1
+        try:
+            return int(t.replace("_", "")), i + 1
+        except ValueError:
+            return t, i + 1
+
+    lines = text.splitlines()
+    n = 0
+    while n < len(lines):
+        line = lines[n].strip()
+        n += 1
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$", line)
+        if m:
+            cur = root
+            for part in m.group(1).split("."):
+                cur = cur.setdefault(part.strip().strip("\"'"), {})
+            continue
+        if "=" not in line:
+            continue
+        chunk = line
+        # an array or inline table may span several lines: read until the brackets balance
+        while chunk.count("[") + chunk.count("{") > chunk.count("]") + chunk.count("}") and n < len(lines):
+            chunk += "\n" + lines[n]
+            n += 1
+        tokens = _TOML_TOKEN.findall(chunk)
+        try:
+            v, _ = value(tokens, 2)
+        except (IndexError, ValueError):
+            continue
+        cur[tokens[0].strip("\"'")] = v
+    return root
 
 
 def _tox_deps(text: str) -> list[str]:
