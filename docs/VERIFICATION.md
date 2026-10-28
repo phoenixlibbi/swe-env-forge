@@ -103,3 +103,33 @@ Rebuilt and re-validated, the merge commit that failed with the generic template
 - **Offline isolation.** When the sandbox is offline, the internet is unreachable while the services still work.
 - **Clean-up.** Service containers are removed with the sandbox.
 - **Clear failures.** A service that never opens its port fails with a clear error, and nothing is left behind.
+
+## 9. Agreement with another harness on real frontier-model patches
+
+A private, multi-language SWE dataset was used. Its tasks and trajectories are not published; only the aggregate results are reported here. It comes with:
+- tasks in SWE-bench's `specs` format,
+- Dockerfiles,
+- recorded SWE-agent runs of two frontier models,
+- the dataset's own harness verdict for each run.
+
+Four of its tasks were used: three C# (.NET) tasks and one Rust task.
+
+**Setup.**
+- **Tasks:** converted with `sweforge convert --format generic`.
+- **Environments:** built from the dataset's own Dockerfiles.
+- **Grading:** with `--test-network`, as the dataset's harness ran.
+
+**Results.**
+- **Reference and empty patch:** on all 4 tasks, the reference patch resolves and the empty patch does not.
+- **12 real model patches** (1–5 turns per task), graded and compared with the recorded verdicts: **12 / 12 agreement**.
+  - 2 were resolved by both harnesses.
+  - 10 were unresolved by both.
+- **10 of the 12 patches edited hidden test files**, including snapshot files. They were reverted and flagged before grading.
+
+**Weaknesses this surfaced, all fixed with regression tests:**
+1. **Interleaved Cargo output.** With `--nocapture`, a test's output sits between `test x ... ` and its `ok` line, so 12 Rust tests were reported missing. The parser now attaches the late status.
+2. **The `build` step was ignored.** Generic `specs` rows skipped `build`, so with `dotnet test --no-build` a patch would never be recompiled. `build` now runs before every test run.
+3. **`pre_install` was repeated.** Those steps were re-run at test time even when the Dockerfile already contained them. Steps already in the Dockerfile are now skipped.
+4. **Offline runs that need the internet** (crates not vendored into the image) were reported as `tests_not_run`. They are now diagnosed as `environment_needs_network`.
+
+**Environment rot.** One task's Dockerfile no longer builds today. A dependency has since received a security advisory, and .NET's restore treats that warning as an error. `ENV NuGetAudit=false` fixed it. Environments should be built once and kept by digest, which every grade now records.
