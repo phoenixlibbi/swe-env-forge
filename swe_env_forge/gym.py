@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .grade import grade
+from .grade import GradeResult, grade
 from .sandbox import Sandbox
 from .task import Task, append_jsonl
 from .tools import Toolkit
@@ -171,8 +171,10 @@ def run_episode(task: Task, agent, backend: str = "docker", budget: Budget | Non
     ep = Episode(task.instance_id, agent_name)
     start = time.monotonic()
     env = SWEEnv(task, backend, budget, network=network, checkpoint_every=checkpoint_every)
+    started = False
     try:
         obs = env.reset()
+        started = True   # from here on, a broken environment is the agent's doing
         agent.reset(obs)
         last: str | None = None
         while not env.done:
@@ -187,12 +189,19 @@ def run_episode(task: Task, agent, backend: str = "docker", budget: Budget | Non
         ep.exit_reason, ep.turns, ep.cost = env.exit_reason, env.turn, round(env.cost, 6)
         ep.patch, ep.steps, ep.checkpoints = env.final_patch, env.steps, env.checkpoints
     except Exception as exc:
-        ep.exit_reason, ep.error = "env_error", f"{type(exc).__name__}: {exc}"
+        ep.error = f"{type(exc).__name__}: {exc}"
         ep.steps, ep.turns = env.steps, env.turn
+        if started:
+            # e.g. `rm -rf .git` makes the diff impossible: reward 0, and the episode stays counted
+            ep.exit_reason = "agent_broke_env"
+            ep.grade = GradeResult(task.instance_id, failure="agent_broke_env",
+                                   flags=["agent_broke_env"]).to_dict()
+        else:
+            ep.exit_reason = "env_error"    # infrastructure failed before the agent acted: excluded
     finally:
         env.close()
     ep.duration = round(time.monotonic() - start, 2)
-    if do_grade and ep.exit_reason != "env_error":
+    if do_grade and ep.exit_reason not in ("env_error", "agent_broke_env"):
         ep.grade = grade(task, ep.patch, backend, strict=strict, timeout=timeout).to_dict()
         if grade_checkpoints:
             cache: dict[str, dict] = {}

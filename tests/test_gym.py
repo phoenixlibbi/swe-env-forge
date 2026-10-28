@@ -155,3 +155,14 @@ def test_truncate():
     assert truncate("abc", 10) == "abc"
     t = truncate("x" * 100, 30)
     assert "truncated" in t and t.startswith("x" * 20)
+
+
+def test_agent_that_breaks_git_scores_zero_and_stays_counted(fix_task):
+    from swe_env_forge.report import build_report
+
+    ep = run_episode(fix_task, ReplayAgent(["rm -rf .git"]), "local")
+    assert ep.exit_reason == "agent_broke_env"
+    assert ep.grade["resolved"] is False and ep.grade["dense"] == 0.0 and ep.grade["failure"] == "agent_broke_env"
+    rep = build_report([ep])
+    assert rep["n"] == 1 and rep["slices"]["overall"]["all"]["resolved_pct"] == 0.0
+    assert rep["failure_modes"]["not_submitted"]["buckets"]["broke_environment"]["count"] == 1

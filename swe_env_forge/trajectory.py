@@ -7,7 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-EXIT_REASONS = ("submitted", "max_turns", "max_cost", "max_time", "context_overflow", "agent_error", "env_error")
+EXIT_REASONS = ("submitted", "max_turns", "max_cost", "max_time", "context_overflow", "agent_error",
+                "agent_broke_env", "env_error")
 
 
 @dataclass

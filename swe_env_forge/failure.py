@@ -20,7 +20,7 @@ from .trajectory import Episode
 SUBMITTED_BUCKETS = ("wrong_solution", "edge_case", "regression", "syntax_error", "incorrect_file",
                      "instruction_following", "empty_patch", "malformed_patch", "other")
 NOT_SUBMITTED_BUCKETS = ("long_context", "stuck_in_loop", "endless_reading", "tool_use", "budget_exhausted",
-                         "agent_error", "harness_error")
+                         "broke_environment", "agent_error", "harness_error")
 
 _SYNTAX = re.compile(r"\bSyntaxError\b|\bIndentationError\b|\bTabError\b|error TS1\d{3}|error\[E0(?:06[0-9]|1\d\d)\]"
                      r"|syntax error|expected ';'|Unexpected token|ParseError|could not compile|compilation failed"
@@ -54,6 +54,8 @@ def classify(ep: Episode, task: Task | None = None) -> str:
         return "harness_error"
     commands = _commands(ep)
     if ep.exit_reason != "submitted":
+        if ep.exit_reason == "agent_broke_env":
+            return "broke_environment"
         if ep.exit_reason == "context_overflow":
             return "long_context"
         if ep.exit_reason == "agent_error":
