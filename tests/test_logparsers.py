@@ -115,3 +115,9 @@ def test_is_pass():
 def test_cargo_short_names():
     out = parse_log((LOGS / "cargo.log").read_text(), "cargo-short")
     assert out["totals"] == "PASSED" and out["discounts"] == "FAILED"
+
+
+def test_cargo_status_after_captured_output():
+    log = ("test test_edge_cases ... Edge case 0 parsed\nEdge case 1 parsed\nok\n"
+           "test test_valid ... Parsed 19 fixtures\nFAILED\ntest test_fast ... ok\n")
+    assert parse_log(log, "cargo") == {"test_edge_cases": "PASSED", "test_valid": "FAILED", "test_fast": "PASSED"}

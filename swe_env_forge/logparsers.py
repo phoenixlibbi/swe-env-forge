@@ -313,11 +313,24 @@ def parse_tap(log: str) -> dict[str, str]:
 def parse_cargo(log: str) -> dict[str, str]:
     """``cargo test`` lines: ``test module::name ... ok | FAILED | ignored``."""
     out: dict[str, str] = {}
+    status = {"ok": PASSED, "FAILED": FAILED, "ignored": SKIPPED, "bench": PASSED}
     rx = re.compile(r"^test (\S+(?: - .*?)?) \.\.\. (ok|FAILED|ignored|bench)")
+    started = re.compile(r"^test (\S+(?: - .*?)?) \.\.\. (?!(?:ok|FAILED|ignored|bench)\b)")
+    pending = None   # with --nocapture a test's output lands between "test x ... " and its status line
     for line in strip_ansi(log).split("\n"):
-        m = rx.match(line.strip())
+        stripped = line.strip()
+        m = rx.match(stripped)
         if m:
-            out[m.group(1)] = {"ok": PASSED, "FAILED": FAILED, "ignored": SKIPPED, "bench": PASSED}[m.group(2)]
+            out[m.group(1)] = status[m.group(2)]
+            pending = None
+            continue
+        m = started.match(stripped)
+        if m:
+            pending = m.group(1)
+            continue
+        if pending and stripped in status:
+            out[pending] = status[stripped]
+            pending = None
     return out
 
 
