@@ -218,7 +218,7 @@ SKIP_MARKER_RE = re.compile(
     r"@pytest\.mark\.(?:skip|skipif|xfail)\b|@unittest\.skip|\bpytest\.skip\(|\bself\.skipTest\("
     r"|\b(?:it|test|describe|context)\.(?:skip|todo)\(|\b(?:xit|xdescribe|xtest)\("
     r"|\bt\.Skip(?:Now|f)?\(|#\[ignore\]|@Ignore\b|@Disabled\b|\[Ignore\b|\bSkip\s*=\s*\""
-    r"|\bmarkTestSkipped\(|^\s*(?:skip|pending)\b(?:\s|$|\()"
+    r"|\bmarkTestSkipped\(|^\s*(?:skip|pending)\b(?:\s|$|\()|\bpytest\.xfail\("
 )
 
 

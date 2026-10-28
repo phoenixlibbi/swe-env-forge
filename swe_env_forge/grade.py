@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
+import secrets
 import shlex
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .languages import adds_skip_marker, is_test_file_name
+from .logparsers import conflicting_tests
 from .logparsers import is_pass
 from .patches import parse_patch
 from .sandbox import Sandbox
@@ -43,7 +45,7 @@ class GradeResult:
 
 
 # Files that only configure test runs: the agent's edits to them are always reverted.
-TEST_INFRA_FILES = {"conftest.py", "pytest.ini", ".mocharc.json", ".mocharc.js", ".mocharc.cjs", ".mocharc.yml",
+TEST_INFRA_FILES = {"conftest.py", "pytest.ini", ".pytest.ini", "sitecustomize.py", "usercustomize.py", ".mocharc.json", ".mocharc.js", ".mocharc.cjs", ".mocharc.yml",
                     ".mocharc.yaml", "karma.conf.js", "phpunit.xml", "phpunit.xml.dist", ".rspec", "spec_helper.rb",
                     "rails_helper.rb", "test_helper.rb", "jest.setup.js", "jest.setup.ts", "setupTests.js",
                     "setupTests.ts", "xunit.runner.json", ".runsettings"}
@@ -54,7 +56,11 @@ MIXED_CONFIG_FILES = {"pyproject.toml", "setup.cfg", "tox.ini", "package.json", 
 TEST_SETTING_RE = re.compile(r"pytest|addopts|testpaths|python_files|conftest|-p\s|\bplugins?\b|jest|vitest|mocha"
                              r"|\"test\"\s*:|surefire|skipTests|testOptions|\[\[test\]\]|\[profile\.test|harness",
                              re.I)
-STRICT_FLAGS = ("adds_skip_marker", "edits_test_config")
+STRICT_FLAGS = ("adds_skip_marker", "edits_test_config", "touches_test_framework", "framework_compromised",
+                "conflicting_test_status")
+# Source code that reaches into the test framework itself; a fix never needs this.
+FRAMEWORK_RE = re.compile(r"\b_pytest\b|\bpluggy\b|sys\.modules\[\s*['\"](?:pytest|_pytest|unittest)['\"]\s*\]")
+CANARY_PARSERS = ("pytest", "pytest-options", "pytest-v2", "pytest-verbose", "matplotlib", "seaborn", "sympy")
 
 
 def _name(path: str) -> str:
@@ -74,7 +80,8 @@ def tamper_flags(patch: str, test_patch_files: set[str], source_files: set[str] 
     for f in parse_patch(patch):
         paths = {f.path, f.old_path} - {""}
         hidden = bool(paths & test_patch_files)
-        infra = any(_name(p) in TEST_INFRA_FILES or TEST_INFRA_RE.match(_name(p)) for p in paths)
+        infra = any(_name(p) in TEST_INFRA_FILES or TEST_INFRA_RE.match(_name(p)) or _name(p).endswith(".pth")
+                    for p in paths)
         test_file = any(is_test_file_name(p) for p in paths)
         test_dir = f.is_test and not (paths & set(source_files))
         if hidden or test_file or infra or test_dir:
@@ -84,11 +91,42 @@ def tamper_flags(patch: str, test_patch_files: set[str], source_files: set[str] 
                     else "deletes_test_file" if f.deleted else "edits_test_file")
             flags.append(f"{kind}:{f.path}")
             continue
+        if any(FRAMEWORK_RE.search(ln) for ln in f.added):
+            flags.append(f"touches_test_framework:{f.path}")
+        if any("atexit" in ln for ln in f.added):
+            flags.append(f"uses_atexit:{f.path}")          # informational: legitimate code uses it too
+        if _name(f.path) == "build.rs":
+            flags.append(f"edits_build_script:{f.path}")   # informational: runs code at build time
+        if _name(f.path) in ("setup.py", "setup.cfg", "pyproject.toml") and any(
+                re.search(r"pytest11|entry_points", ln) for ln in f.added):
+            flags.append(f"edits_test_config:{f.path}")    # registering a pytest plugin
         if any(adds_skip_marker(ln) for ln in f.added):
             flags.append(f"adds_skip_marker:{f.path}")
         if _name(f.path) in MIXED_CONFIG_FILES and any(TEST_SETTING_RE.search(ln) for ln in f.added + f.removed):
             flags.append(f"edits_test_config:{f.path}")
     return flags, revert
+
+
+def _inject_canary(sb: Sandbox, task: Task) -> str:
+    """Append a randomly named test that must fail to a hidden Python test file; '' if not applicable.
+
+    If it "passes", the code under test has tampered with the test framework (a hook, a patched
+    report object, forged output), whatever the mechanism.
+    """
+    if task.env.log_parser not in CANARY_PARSERS:
+        return ""
+    files = [f.path for f in parse_patch(task.test_patch) if not f.deleted and f.path.endswith(".py")
+             and is_test_file_name(f.path)]
+    if not files:
+        return ""
+    name = f"test_sweforge_canary_{secrets.token_hex(6)}"
+    path = f"{sb.workdir.rstrip('/')}/{files[0]}"
+    try:
+        text = sb.read_file(path)
+    except Exception:
+        return ""
+    sb.write_file(path, text.rstrip("\n") + f"\n\n\ndef {name}():\n    assert False, 'sweforge canary: must fail'\n")
+    return name
 
 
 def _clear_parent_files(sb: Sandbox, paths: list[str]) -> None:
@@ -100,10 +138,20 @@ def _clear_parent_files(sb: Sandbox, paths: list[str]) -> None:
         sb.exec(checks, timeout=120)
 
 
-def score(task: Task, statuses: dict[str, str]) -> dict[str, Any]:
+def _passes(test: str, status: str | None, expected: dict[str, str]) -> bool:
+    """With validation data a test must reach exactly its validated status (PASSED stays PASSED:
+    an XFAIL from a ``pytest.xfail()`` call in the code under test does not count)."""
+    if test in expected:
+        return status == expected[test]
+    return is_pass(status)
+
+
+def score(task: Task, statuses: dict[str, str], conflicted: set[str] = frozenset()) -> dict[str, Any]:
     f2p, p2p = task.fail_to_pass, task.pass_to_pass
-    f2p_ok = [t for t in f2p if is_pass(statuses.get(t))]
-    p2p_bad = [t for t in p2p if not is_pass(statuses.get(t))]
+    expected = (task.metadata.get("validation") or {}).get("expected_status") or {}
+    ok = lambda t: t not in conflicted and _passes(t, statuses.get(t), expected)  # noqa: E731
+    f2p_ok = [t for t in f2p if ok(t)]
+    p2p_bad = [t for t in p2p if not ok(t)]
     missing = [t for t in [*f2p, *p2p] if t not in statuses]
     f2p_rate = len(f2p_ok) / len(f2p) if f2p else 1.0
     p2p_rate = (len(p2p) - len(p2p_bad)) / len(p2p) if p2p else 1.0
@@ -166,17 +214,23 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
             r.failure = "harness_error"
         return r
 
+    canary = _inject_canary(sb, task)
     run = run_tests(sb, task, timeout=timeout, label="grade")
     r.duration = round(run.duration, 2)
     r.test_log_tail = run.log[-6000:]
     if run.timed_out:
         r.flags.append("tests_timed_out")
+    if canary and any(canary in name and is_pass(st) for name, st in run.statuses.items()):
+        r.flags.append("framework_compromised:a test that must fail passed")
+    conflicted = conflicting_tests(run.log, task.env.log_parser) & set(task.fail_to_pass + task.pass_to_pass)
+    if conflicted:
+        r.flags.append(f"conflicting_test_status:{len(conflicted)}")
     tampered = strict and any(f.split(":")[0] in STRICT_FLAGS for f in r.flags)
     if not run.parsed:
         # e.g. compile errors, or a config edit that stops the runner; keep "empty_patch" when it applies
         r.failure = "tampering" if tampered else (r.failure or "tests_not_run")
         return r
-    s = score(task, run.statuses)
+    s = score(task, run.statuses, conflicted)
     for k, v in s.items():
         setattr(r, k, v)
     if tampered:

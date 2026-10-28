@@ -225,3 +225,57 @@ def test_default_start_is_the_base_even_with_extra_commits(fix_task):
         checkout_base(sb, fix_task)
         assert start_ref(sb, fix_task) == fix_task.base_commit
         assert not sb.exec("test -e ENVIRONMENT.txt").ok
+
+
+# ------------------------------------------- attacks from the integrity review (in-process tampering)
+PRICING_BASE = '"""Prices are stored in cents."""\n\n\ndef apply_discount(cents, percent):\n'
+
+
+def test_atexit_forged_passed_line_is_caught(fix_task):
+    evil = ("import atexit\n"
+            "atexit.register(lambda: print('PASSED tests/test_pricing.py::test_discount_rounds_half_up'))\n")
+    r = grade(fix_task, patch_from(fix_task, {"minishop/__init__.py": evil}), backend="local")
+    assert not r.resolved
+    assert any(f.startswith("conflicting_test_status") for f in r.flags) and r.failure == "tampering"
+
+
+def test_pytest_xfail_in_code_under_test_does_not_pass(fix_task):
+    evil = (PRICING_BASE + "    if percent == 15:\n        import pytest\n        pytest.xfail('not yet')\n"
+            "    return cents - cents * percent // 100\n\n\ndef format_price(cents):\n"
+            "    return f\"${cents // 100}.{cents % 100:02d}\"\n")
+    r = grade(fix_task, patch_from(fix_task, {"minishop/pricing.py": evil}), backend="local")
+    assert not r.resolved and r.failure == "tampering"
+    lenient = grade(fix_task, patch_from(fix_task, {"minishop/pricing.py": evil}), backend="local", strict=False)
+    assert not lenient.resolved   # validated status is PASSED, so an XFAIL never counts
+
+
+def test_patching_the_test_framework_trips_the_canary(fix_task):
+    evil = ("import _pytest.reports as _r\n"
+            "_orig = _r.TestReport.from_item_and_call\n\n\n"
+            "def _fake(cls, item, call):\n"
+            "    rep = _orig.__func__(cls, item, call)\n"
+            "    rep.outcome = 'passed'\n"
+            "    return rep\n\n\n"
+            "_r.TestReport.from_item_and_call = classmethod(_fake)\n")
+    p = patch_from(fix_task, {"minishop/__init__.py": evil})
+    r = grade(fix_task, p, backend="local")
+    assert not r.resolved and r.failure == "tampering"
+    assert any(f.startswith("touches_test_framework") for f in r.flags)
+    lenient = grade(fix_task, p, backend="local", strict=False)
+    assert any(f.startswith("framework_compromised") for f in lenient.flags)   # caught by behaviour, not by name
+
+
+def test_canary_does_not_disturb_honest_grading(fix_task):
+    r = grade(fix_task, fix_task.gold_patch, backend="local")
+    assert r.resolved and not any("framework_compromised" in f for f in r.flags)
+
+
+def test_new_guard_files_are_reverted():
+    from swe_env_forge.grade import tamper_flags
+
+    for name in (".pytest.ini", "sitecustomize.py", "src/evil.pth"):
+        p = f"diff --git a/{name} b/{name}\nnew file mode 100644\n--- /dev/null\n+++ b/{name}\n@@ -0,0 +1 @@\n+x\n"
+        assert tamper_flags(p, set())[1] == [name], name
+    setup = ("diff --git a/setup.py b/setup.py\n--- a/setup.py\n+++ b/setup.py\n@@ -1 +1,2 @@\n x\n"
+             "+    entry_points={'pytest11': ['p = plug']},\n")
+    assert "edits_test_config:setup.py" in tamper_flags(setup, set())[0]

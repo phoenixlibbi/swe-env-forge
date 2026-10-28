@@ -455,6 +455,22 @@ def parse_auto(log: str) -> dict[str, str]:
     return best
 
 
+_SUMMARY_LINE = re.compile(r"^(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS) (\S+)")
+PYTEST_FAMILY = ("pytest", "pytest-options", "pytest-v2", "pytest-verbose", "matplotlib", "seaborn", "auto")
+
+
+def conflicting_tests(log: str, parser: str) -> set[str]:
+    """Tests that one pytest log reports with more than one status (e.g. FAILED, then a forged PASSED)."""
+    if parser not in PYTEST_FAMILY:
+        return set()
+    seen: dict[str, set[str]] = {}
+    for line in strip_ansi(log).split("\n"):
+        m = _SUMMARY_LINE.match(line)
+        if m:
+            seen.setdefault(m.group(2), set()).add(m.group(1))
+    return {t for t, sts in seen.items() if len(sts) > 1}
+
+
 def parse_log(log: str, parser: str = "auto") -> dict[str, str]:
     if parser not in PARSERS:
         raise ValueError(f"unknown log parser {parser!r}; choose from {', '.join(sorted(PARSERS))}")

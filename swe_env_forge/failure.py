@@ -75,7 +75,9 @@ def classify(ep: Episode, task: Task | None = None) -> str:
     if failure == "patch_apply_error":
         return "malformed_patch"
     if failure == "tampering" or any(f.startswith(("edits_hidden_test_file", "adds_skip_marker", "deletes_test_file",
-                                                   "edits_test_config", "blocks_hidden_tests"))
+                                                   "edits_test_config", "blocks_hidden_tests",
+                                                   "touches_test_framework", "framework_compromised",
+                                                   "conflicting_test_status"))
                                      for f in g.get("flags", [])):
         return "instruction_following"
     if _SYNTAX.search(g.get("test_log_tail", "")):

@@ -36,6 +36,7 @@ class ValidationResult:
     fail_to_fail: list[str] = field(default_factory=list)
     flaky: list[str] = field(default_factory=list)
     masked_f2p: list[str] = field(default_factory=list)   # "F2P" tests that already passed before the change
+    expected_status: dict[str, str] = field(default_factory=dict)   # status after the fix, per F2P / P2P test
     naming_errors: list[dict[str, str]] = field(default_factory=list)
     runs: int = 0
     pre_counts: dict[str, int] = field(default_factory=dict)
@@ -260,6 +261,8 @@ def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = 
                     res.warnings.append("f2p_all_passed_before_change")
                 res.masked_f2p = []
     res.fail_to_pass, res.pass_to_pass = groups["f2p"], groups["p2p"]
+    last_post = next((r.statuses for r in reversed(post_runs) if r.parsed), {})
+    res.expected_status = {t: last_post[t] for t in res.fail_to_pass + res.pass_to_pass if t in last_post}
     res.pass_to_fail, res.fail_to_fail, res.flaky = groups["p2f"], groups["f2f"], groups["flaky"]
     res.naming_errors = naming_errors(task, [r.log for r in pre_runs], [r.log for r in post_runs])
     crashed = [i for i, r in enumerate(post_runs) if not r.parsed]
@@ -301,5 +304,6 @@ def apply_validation(task: Task, result: ValidationResult) -> Task:
     task.metadata["validation"] = {k: getattr(result, k) for k in ("verdict", "reasons", "warnings", "runs")}
     task.metadata["validation"]["flaky"] = list(result.flaky)
     task.metadata["validation"]["masked_f2p"] = list(result.masked_f2p)
+    task.metadata["validation"]["expected_status"] = dict(result.expected_status)
     task.metadata["validation"]["naming_errors"] = list(result.naming_errors)
     return task
