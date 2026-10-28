@@ -127,10 +127,10 @@ Given a task `T` and a candidate patch `P`:
 
 These are SWE-bench Stage III, plus Pro's repeated gold runs, plus Terminal-Bench's no-op check.
 
-- **`pre`** = base + test_patch, run `N` times. **`post`** = base + test_patch + gold_patch, run `N` times.
+- **`pre`** = base + test_patch, run `N` times. **`post`** = base + test_patch + gold_patch, run `N` times. Each run gets a fresh sandbox, so ignored build outputs and caches that survive `git clean` can't carry over from one run to the next.
 - A test is `PASS` (or `FAIL`) in a set of runs only if it has that status in **every** run. Otherwise it's `FLAKY`.
 - **F2P** = FAIL in pre and PASS in post. **P2P** = PASS in pre and PASS in post. **P2F** = broken by the gold patch. Flaky tests are excluded and reported.
-- **Base run (masked F2P):** if F2P is non-empty, the tests run once more at the start commit *without* the test patch. A would-be F2P test moves to P2P when it passed there and its body is unchanged by the test patch. Such a test only failed because the new test file imports a name the fix creates. Changed tests are found by mapping test-patch hunks to their enclosing function.
+- **Base run (masked F2P):** if F2P is non-empty, the tests run once more at the start commit *without* the test patch. A would-be F2P test moves to P2P when it passed there and its body is unchanged by the test patch. Such a test only failed because the new test file imports a name the fix creates. Changed tests are found by mapping each test-patch hunk to the test that encloses it by indentation: `def` in Python, `it(...)` / `test(...)` / `describe(...)` in JavaScript and TypeScript (mocha, jest, vitest, ospec), `func` and `t.Run` in Go, `fn` in Rust, methods for the JVM / .NET / Swift / PHP family, gtest `TEST` macros, and RSpec / minitest. A change directly inside a `describe` block counts for every test in it. For a language without rules, nothing is unmasked.
 - **Environment diagnosis:** modules still missing after the fix give `environment_incomplete:<module>`, not `no_f2p`.
 - **Naming leak:** "missing symbol" errors in `pre` (ImportError, Go `undefined:`, Rust E0425, C# CS0103, Java "cannot find symbol", …) whose symbol isn't mentioned in the problem statement or interface.
 - **Verdict:**

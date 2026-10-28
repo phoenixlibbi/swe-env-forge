@@ -38,6 +38,8 @@ For each repository in SWE-bench Lite, one task was graded with the reference pa
 | `django__django-11099` | P2P ⊇ dataset; one dataset F2P test passes before the fix in the official image |
 | SWE-bench Pro `openlibrary-00bec1e7` (Python) | identical (5 / 15), using Pro's own `run_script.sh` + `parser.py` |
 | SWE-bench Pro `navidrome-0130c6dc` (Go) | identical (1 / 0) |
+| SWE-bench Pro `NodeBB-00c70ce7` (JavaScript) | identical F2P (2); 679 more tests move to P2P (see section 10) |
+| SWE-bench Pro `tutanota-51818218` (TypeScript) | identical (4 / 0) |
 
 ## 3. Predictions run through the official SWE-bench harness
 
@@ -133,3 +135,19 @@ Four of its tasks were used: three C# (.NET) tasks and one Rust task.
 4. **Offline runs that need the internet** (crates not vendored into the image) were reported as `tests_not_run`. They are now diagnosed as `environment_needs_network`.
 
 **Environment rot.** One task's Dockerfile no longer builds today. A dependency has since received a security advisory, and .NET's restore treats that warning as an error. `ENV NuGetAudit=false` fixed it. Environments should be built once and kept by digest, which every grade now records.
+
+## 10. SWE-bench Pro in four languages
+
+One public Pro task per language was taken: openlibrary (Python), navidrome (Go), NodeBB (JavaScript) and tutanota (TypeScript). Each ran in its official Pro image with Pro's own per-task `run_script.sh` and `parser.py`. Every task was checked twice: graded with the reference and the empty patch, then validated from scratch.
+
+**Results.**
+- **Grading:** on all 4 tasks the reference patch resolves and the empty patch does not.
+- **Test lists:** `validate` re-derives the dataset's FAIL_TO_PASS exactly on all 4 tasks (table in section 2).
+
+**Weaknesses this surfaced, all fixed:**
+1. **Outdated Pro scripts.** The JavaScript and TypeScript reference patches first graded as wrong. Pro's repository has two sets of per-task scripts. The older `run_scripts/` set names tests differently from the published dataset. `fetch --with-scripts` now prefers the current set (`v2/tasks/<id>/tests/`), falls back to the old one, and records which it used in the task's metadata.
+2. **Masked F2P outside Python.** NodeBB's test patch changes a shared database mock to call a function the fix adds. Before the fix, every test in the suite fails at setup, so all 681 looked like fail-to-pass. Unmasking used to work only in Python, because only Python had rules for which tests a patch changes. Changed-test detection now covers mocha / jest / vitest / ospec blocks, Go, Rust, JVM / .NET / Swift / PHP methods, gtest and Ruby. A test that passed at the start commit and whose body the test patch did not change moves to P2P. Result: F2P is exactly the dataset's 2 tests. That includes `should toggle caches`, whose body changed while its title stayed the same.
+3. **State shared between validation runs.** Pre, post and base runs used to share one container. Ignored build outputs (`build/`, compiled tests) survive `git clean -fd` and could leak from one run into the next. Every run now gets a fresh sandbox.
+   - Regression tests: `tests/test_validate_grade.py::test_changed_tests_in_*`.
+
+**Upstream flake (not fixed: it is in the project's own tests).** One tutanota validation run came back `invalid` with no F2P. A crypto test in another workspace package (`RsaTest`, "test invalid signature (modified signature)") failed. The project's source comments call it flaky. Because `npm test -ws` stops at the first failing workspace, the target tests never ran. The rerun was valid and matched the dataset. This is why `validate` defaults to `--runs 2`: tests whose status changes between runs are reported as flaky and kept out of the test lists, never counted as passes.

@@ -238,8 +238,11 @@ Every check below used the benchmarks' **own** images and data. The full log, wi
   | pytest-5227 | identical |
   | SWE-bench Pro openlibrary (Python) | identical, run with Pro's own per-instance scripts |
   | SWE-bench Pro navidrome (Go) | identical |
+  | SWE-bench Pro NodeBB (JavaScript) | identical F2P (2); 679 tests that only failed because the new test mock needs the fix move to P2P |
+  | SWE-bench Pro tutanota (TypeScript) | identical (4 / 0) |
   | django-11099 | one dataset F2P test passes *before* the fix in the official image |
 
+- **SWE-bench Pro in all four languages** (Python, Go, JavaScript, TypeScript), with Pro's current (V2) per-task scripts: the reference patch resolves and the empty patch does not on every task.
 - **Official harness.** The predictions file written by `sweforge run` scored **2/2 resolved** in the official `swebench` package (v5.0.2).
 - **Real repository, end to end.** `pallets/itsdangerous` went through mine, build, validate, spec, grade. It produced 2 valid tasks. 3 candidates were correctly rejected: two were not behaviour changes, and one had a missing test dependency.
 - **The answer stays hidden.** Agents in these sandboxes see no commit after the base (none of django's 26,747), have no network, and find nothing hidden in their scratch space.
@@ -502,17 +505,17 @@ Every grade also carries `flags`, `failure` and `reverted_test_files`, so reward
 - **Pro scripts.** SWE-bench Pro's per-task `parser.py` runs on the host, outside the sandbox. Use it only with scripts from the official Pro repository.
 - **P2P covers the test files the test patch touches.** This is the same scope as SWE-bench. A regression elsewhere in the suite is not seen.
 - **Environment building covers most repositories, not all.** CI detection plus the setup agent handle common Python, Node, Go, Rust and Java setups and their services. UI tests that need browsers, paid APIs, private registries and hardware-specific code still need a human. Those tasks are reported as `environment_incomplete` or `environment_needs_network`, never silently dropped. Dockerfiles also rot over time; build once and keep the image (its digest is recorded).
-- **Static checks are heuristics.** The naming-leak, interface and definition checks are per-language regexes. The leak check works on token n-grams, so a paraphrased leak passes. Treat their output as drafts and warnings.
+- **Static checks are heuristics.** The naming-leak, interface and definition checks, and the changed-test detection behind masked F2P, are per-language regexes; changed-test detection also relies on conventional indentation. The leak check works on token n-grams, so a paraphrased leak passes. Treat their output as drafts and warnings.
 - **Rust in-file tests can't be split out.** Unit tests inside Rust source files (`#[cfg(test)]`) stay in the gold patch when a commit is split.
 - **The LLM agent is a minimal reference agent.** The LLM features (agent, spec writer, setup agent) are verified with scripted models in the tests. Live runs with a small local model showed format brittleness, which has since been hardened, but they were not repeated at scale. Use your own agent for leaderboard numbers.
-- **Evidence is small-sample.** It is one task per SWE-bench repository, 4 re-derived test lists, one public mined repository, and a handful of real-agent patches (see [docs/VERIFICATION.md](docs/VERIFICATION.md)). Agreement with the official harness on hundreds of real predictions has not been measured.
+- **Evidence is small-sample.** It is one task per SWE-bench repository, 6 re-derived test lists (4 of them Pro, one per language), one public mined repository, and a handful of real-agent patches (see [docs/VERIFICATION.md](docs/VERIFICATION.md)). Agreement with the official harness on hundreds of real predictions has not been measured.
 
 ## Development
 
 ```bash
 git clone https://github.com/phoenixlibbi/swe-env-forge && cd swe-env-forge
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q                  # ~250 tests, no Docker or network needed (~2 min)
+.venv/bin/pytest -q                  # ~280 tests, no Docker or network needed (~2 min)
 .venv/bin/pytest -q -m network      # live HuggingFace / GitHub checks
 ```
 

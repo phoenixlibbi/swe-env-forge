@@ -144,15 +144,44 @@ def _base_run(sb: Sandbox, task: Task, timeout: float | None) -> TestRun | None:
     return run_tests(sb, task, timeout=timeout, label="base", files=files)
 
 
-_TEST_DEF = re.compile(r"^(\s*)(?:async\s+)?def\s+(\w+)\s*\(|^(\s*)class\s+(\w+)")
+_Q = r"(?P<q>['\"`])(?P<name>.*?)(?P=q)"
+_MODS = r"(?:(?:public|private|protected|internal|static|async|override|final|suspend|open|fun|func|void|function|Task)\s+)+"
+# Lines that open a test (or a scope that holds tests), per language. ``name`` is the test's name;
+# a match without one (a Python class) only marks a scope. ``ind`` is the line's indentation.
+_TEST_DEFS: dict[str, list[re.Pattern[str]]] = {k: [re.compile(p) for p in v] for k, v in {
+    "python": [r"^(?P<ind>\s*)(?:async\s+)?def\s+(?P<name>\w+)\s*\(", r"^(?P<ind>\s*)class\s+\w+"],
+    "javascript": [r"^(?P<ind>\s*)(?:it|test|specify|describe|context|suite|o)(?:\.\w+)*\s*\(\s*" + _Q],
+    "go": [r"^(?P<ind>)func\s+(?:\([^)]*\)\s*)?(?P<name>\w+)\s*\(", r"^(?P<ind>\s*)\w+\.Run\(\s*" + _Q],
+    "rust": [r"^(?P<ind>\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?P<name>\w+)"],
+    "methods": [r"^(?P<ind>\s*)" + _MODS + r"(?:[\w<>\[\],.?]+\s+)?`?(?P<name>[\w ]*?\w)`?\s*[(<]",
+                r"^(?P<ind>\s*)TEST(?:_F|_P)?\(\s*\w+\s*,\s*(?P<name>\w+)"],
+    "ruby": [r"^(?P<ind>\s*)def\s+(?P<name>\w+)", r"^(?P<ind>\s*)(?:it|specify|describe|context|test)\s*\(?\s*" + _Q],
+}.items()}
+_TEST_DEFS["typescript"] = _TEST_DEFS["javascript"]
+for _lang in ("java", "kotlin", "scala", "csharp", "swift", "php", "cpp"):
+    _TEST_DEFS[_lang] = _TEST_DEFS["methods"]
+
+
+def _test_def(lang: str, line: str) -> tuple[int, str | None] | None:
+    """(indentation, test name or None) when ``line`` opens a test or test scope."""
+    for rx in _TEST_DEFS[lang]:
+        m = rx.match(line)
+        if m:
+            return len(m.group("ind")), m.groupdict().get("name")
+    return None
 
 
 def changed_test_functions(sb: Sandbox, task: Task) -> dict[str, set[str]] | None:
-    """{test file: names of test functions whose body the test patch adds or changes}.
+    """{test file: names of the tests whose body the test patch adds or changes}.
 
-    Read from the patched files in ``sb`` (call it after the test patch is applied). Only Python
-    files are analysed; returns ``None`` when any test file is in another language, so callers can
-    fall back to the conservative behaviour.
+    Read from the patched files in ``sb`` (call it after the test patch is applied). Each changed
+    line is attributed to the nearest test definition that encloses it by indentation: ``def`` /
+    ``class`` in Python, ``it(...)`` / ``test(...)`` / ``describe(...)`` blocks in JavaScript and
+    TypeScript (mocha, jest, vitest, ospec), ``func`` and ``t.Run`` in Go, ``fn`` in Rust, methods in
+    the JVM / .NET / Swift / PHP family, gtest ``TEST`` macros, and RSpec / minitest in Ruby. A change
+    directly inside a ``describe`` names the whole block, which keeps every test in it. Returns
+    ``None`` when a test file is in a language without rules, so callers fall back to the
+    conservative behaviour.
     """
     from .languages import language_of
     from .patches import parse_patch
@@ -161,7 +190,8 @@ def changed_test_functions(sb: Sandbox, task: Task) -> dict[str, set[str]] | Non
     for f in parse_patch(task.test_patch):
         if f.deleted or not language_of(f.path):
             continue
-        if language_of(f.path) != "python":
+        lang = language_of(f.path)
+        if lang not in _TEST_DEFS:
             return None
         try:
             lines = sb.read_file(f.path).split("\n")
@@ -182,29 +212,38 @@ def changed_test_functions(sb: Sandbox, task: Task) -> dict[str, set[str]] | Non
         for lineno in changed:
             if not 1 <= lineno <= len(lines):
                 continue
-            line = lines[lineno - 1]
+            line = lines[lineno - 1].replace("\t", "    ")
             if not line.strip():
                 continue  # blank lines belong to nothing
-            m = _TEST_DEF.match(line)
-            if m and m.group(2):
-                names.add(m.group(2))  # the definition line itself
+            d = _test_def(lang, line)
+            if d and d[1]:
+                names.add(d[1])  # the definition line itself
                 continue
             indent = len(line) - len(line.lstrip())
-            # walk up to the nearest function that encloses this line (strictly smaller indentation)
+            # walk up to the nearest test that encloses this line (strictly smaller indentation)
             for i in range(lineno - 2, -1, -1):
-                m = _TEST_DEF.match(lines[i])
-                if m and m.group(2) and len(m.group(1)) < indent:
-                    names.add(m.group(2))
+                above = lines[i].replace("\t", "    ")
+                d = _test_def(lang, above)
+                if d and d[1] and d[0] < indent:
+                    names.add(d[1])
                     break
-                if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) == 0 and indent > 0 and not m:
-                    break  # left the top-level block without finding a function
+                if above.strip() and len(above) - len(above.lstrip()) == 0 and indent > 0 and not d:
+                    break  # left the top-level block without finding a test
         out[f.path] = names
     return out
 
 
+_ID_SEP = re.compile(r"::|\s+\|\s+|\s+>\s+|/|#|\.")
+
+
 def _test_name_matches(test_id: str, names: set[str]) -> bool:
-    leaf = re.split(r"::|\.", test_id.split("[", 1)[0])[-1]
-    return leaf in names
+    """Does a reported test id belong to one of ``names`` (a test or an enclosing block)?"""
+    base = test_id.split("[", 1)[0]
+    if re.split(r"::|\.", base)[-1] in names:
+        return True
+    parts = {p.strip() for p in re.split(r"::|\s+\|\s+|\s+>\s+", test_id)}
+    parts |= {p for p in _ID_SEP.split(base) if p}
+    return any(n in parts or (" " in n and n in test_id) for n in names)
 
 
 _ENV_MISSING_KINDS = ("python-module", "js-module", "ruby-load", "c-missing-header", "ts-TS2307")
@@ -264,8 +303,8 @@ def validate_in(sb: Sandbox, task: Task, runs: int = 2, timeout: float | None = 
     # A test can "fail" before the fix only because the new test patch stops its file from importing
     # (it needs a name the fix creates). If it passed at the start commit with the old test files, it is
     # really pass-to-pass: counting it as F2P would hand out reward for merely defining that name.
-    # Only where we can tell which tests the test patch changed (Python today): elsewhere a modified
-    # test that passed in its old form would be wrongly moved to P2P, so nothing is unmasked.
+    # Only where we can tell which tests the test patch changed: otherwise a modified test that
+    # passed in its old form would be wrongly moved to P2P, so nothing is unmasked.
     if base_run and groups["f2p"] and changed_fns is not None:
         with _run_box(sb, fresh) as box:
             base = _base_run(box, task, timeout)

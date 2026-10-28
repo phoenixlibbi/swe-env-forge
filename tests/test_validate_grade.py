@@ -167,6 +167,52 @@ def test_changed_test_functions_maps_hunks_to_enclosing_tests():
     assert not _test_name_matches("tests/test_s.py::TestS::test_other", got["tests/test_s.py"])
 
 
+def _changed(path, new_file, patch):
+    from swe_env_forge.sandbox import LocalSandbox
+    from swe_env_forge.task import Task
+    from swe_env_forge.validate import changed_test_functions
+
+    with LocalSandbox() as sb:
+        sb.write_file(f"{sb.workdir}/{path}", new_file)
+        return changed_test_functions(sb, Task(instance_id="i", repo="r", base_commit="b", test_patch=patch))
+
+
+def test_changed_tests_in_javascript_follow_it_blocks_not_titles():
+    from swe_env_forge.validate import _test_name_matches
+
+    # the body of an existing test changes while its title stays the same (a real Pro case)
+    new_file = ("describe('socket.io', () => {\n\tit('should ping', () => {\n\t\tassert(1);\n\t});\n\n"
+                "\tit('should toggle caches', async () => {\n\t\tconst c = require('../src/cache');\n"
+                "\t\tc.reset();\n\t});\n});\n")
+    patch = ("diff --git a/test/socket.js b/test/socket.js\n--- a/test/socket.js\n+++ b/test/socket.js\n"
+             "@@ -6,3 +6,4 @@ describe('socket.io', () => {\n \tit('should toggle caches', async () => {\n"
+             "+\t\tconst c = require('../src/cache');\n \t\tc.reset();\n \t});\n")
+    got = _changed("test/socket.js", new_file, patch)
+    assert got == {"test/socket.js": {"should toggle caches"}}
+    names = got["test/socket.js"]
+    assert _test_name_matches("test/socket.js | socket.io | should toggle caches", names)
+    assert not _test_name_matches("test/socket.js | socket.io | should ping", names)
+    # a change directly in the describe body names the block, so every test in it stays changed
+    patch2 = ("diff --git a/test/socket.js b/test/socket.js\n--- a/test/socket.js\n+++ b/test/socket.js\n"
+              "@@ -1,2 +1,3 @@\n describe('socket.io', () => {\n+\tconst helper = 1;\n \tit('should ping', () => {\n")
+    new2 = new_file.replace("describe('socket.io', () => {\n", "describe('socket.io', () => {\n\tconst helper = 1;\n", 1)
+    names2 = _changed("test/socket.js", new2, patch2)["test/socket.js"]
+    assert names2 == {"socket.io"} and _test_name_matches("test/socket.js | socket.io | should ping", names2)
+
+
+def test_changed_tests_in_go_and_java_and_unknown_languages():
+    go = "package x\n\nfunc TestA(t *testing.T) {\n\tt.Run(\"sub case\", func(t *testing.T) {\n\t\tcheck()\n\t})\n}\n"
+    gp = ("diff --git a/x_test.go b/x_test.go\n--- a/x_test.go\n+++ b/x_test.go\n"
+          "@@ -4,2 +4,3 @@\n \tt.Run(\"sub case\", func(t *testing.T) {\n+\t\tcheck()\n \t})\n")
+    assert _changed("x_test.go", go, gp) == {"x_test.go": {"sub case"}}
+    java = ("public class FooTest {\n    @Test\n    public void parsesInput() {\n        assertEquals(1, f());\n    }\n}\n")
+    jp = ("diff --git a/src/test/FooTest.java b/src/test/FooTest.java\n--- a/src/test/FooTest.java\n"
+          "+++ b/src/test/FooTest.java\n@@ -3,2 +3,3 @@\n     public void parsesInput() {\n+        assertEquals(1, f());\n     }\n")
+    assert _changed("src/test/FooTest.java", java, jp) == {"src/test/FooTest.java": {"parsesInput"}}
+    cp = "diff --git a/t/a_test.c b/t/a_test.c\n--- a/t/a_test.c\n+++ b/t/a_test.c\n@@ -1 +1,2 @@\n x\n+y\n"
+    assert _changed("t/a_test.c", "x\ny\n", cp) is None   # no rules for C: callers stay conservative
+
+
 def test_results_carry_an_environment_fingerprint(demo_tasks):
     from swe_env_forge import __version__
 
