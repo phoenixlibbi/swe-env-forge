@@ -1,6 +1,6 @@
 # SWE Env Forge
 
-> **Forge verified, hack-resistant RL environments for coding agents from any git repository.** Mine tasks from history, build their environments, prove each one fair, write the task text, run agents under real budgets, and grade them with a verifier that rejects fake fixes the official SWE-bench harness accepts. Compatible with SWE-bench and SWE-bench Pro.
+> **Forge verified RL environments for coding agents from a git repository, graded by a verifier hardened against reward hacking.** Mine tasks from history, build their environments, prove each one fair, write the task text, run agents under real budgets, and grade them with a verifier that rejects fake fixes the official SWE-bench harness accepts. Compatible with SWE-bench and SWE-bench Pro.
 
 [![CI](https://github.com/phoenixlibbi/swe-env-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/phoenixlibbi/swe-env-forge/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)
@@ -42,22 +42,22 @@
 
 It has no dependencies beyond the Python standard library. Docker and git are used through their CLIs, and LLMs through any OpenAI-compatible HTTP endpoint.
 
-## Why labs and data teams use it
+## Problems it targets
 
-Frontier labs train coding models with RL on SWE-style tasks and report SWE-bench / Pro scores. These are the problems that work runs into, and what swe-env-forge does about each:
+Frontier labs train coding models with RL on SWE-style tasks and report SWE-bench / Pro scores. These are the problems that work runs into, and what swe-env-forge does about each. (This is a research-grade open-source tool; it isn't claimed to be in production use anywhere.)
 
 | Problem | Why it hurts | What swe-env-forge does |
 |---|---|---|
-| **Fresh tasks are scarce.** Public benchmarks are saturated (Verified over 70%) and likely in pre-training data. | Scores on memorized tasks measure nothing. Labs buy new tasks from data vendors. | `mine --mode commits` turns any repository, **including private or licensed code**, into tasks with Pro's method. `stats` measures triviality and license-based contamination risk. |
-| **Rewards get hacked.** Policies learn to edit tests, add a `conftest.py` that fakes passes, or read the fix from git history. | A hackable reward trains the model to cheat and wastes the RL compute. | The tamper guard reverts tests, helpers and runner config. Agents run offline. Future history is purged and the purge verified. Pro's parser runs outside the sandbox. Each attack is a regression test. |
+| **Fresh tasks are scarce.** Public benchmarks are saturated (Verified over 70%) and likely in pre-training data. | Scores on memorized tasks measure nothing. Labs buy new tasks from data vendors. | `mine --mode commits` turns a repository, **including private code**, into tasks with Pro's method. `dedup --against` finds overlap with public benchmarks. `scan` blocks secrets and redacts personal data. `stats` reports triviality and license class. |
+| **Rewards get hacked.** Policies learn to edit tests, add a `conftest.py` that fakes passes, or read the fix from git history. | A hackable reward trains the model to cheat and wastes the RL compute. | The tamper guard reverts tests, helpers and runner config. Code reaching into the test framework is flagged. A must-fail canary test catches framework tampering by its effect. Statuses must match the validated ones. Agents and grading run offline. Future history is purged and the purge verified. Each attack is a regression test. |
 | **Broken tasks poison training.** Flaky tests, F2P tests that don't really fail, gold patches that break other tests, "guess the name" false negatives. | A wrong reward is worse than none: a correct answer that fails teaches the wrong thing. | `validate` runs before and after the fix N times. `grade --gold/--nop --expect` is a CI gate. `spec --check-only` blocks descriptions that leak the fix. |
 | **Binary rewards are sparse on long tasks.** | On 100-line, multi-file Pro tasks most rollouts score 0 and give no gradient. | Every grade returns a dense reward (F2P rate × P2P rate) next to the binary one, plus checkpoint grades along the trajectory. |
 | **Annotation is the expensive step.** Pro paid experts to write every task's text. | It takes thousands of hours and needs an audit trail. | Deterministic drafts, an LLM writer with leak-check retries, or your own agent. Human review files record who wrote and who reviewed every field. |
-| **Eval numbers aren't comparable.** The same model scores ~23% at a $2 cap and 43.6% uncapped. | Models must be compared at equal compute, and failures understood to decide what to train next. | Budget curves give the score at any turn or cost cap from one run. Failure modes use Pro's buckets. Every result is sliced by language and fix size. |
+| **Eval numbers aren't comparable.** The same model scores ~23% at a $2 cap and 43.6% uncapped. | Models must be compared at equal compute, with error bars, and failures understood to decide what to train next. | Budget curves give the score at each turn or cost cap from one run (at checkpoint resolution). Wilson and repo-clustered bootstrap intervals. Unbiased pass@k from `--samples k`. Failure modes use Pro's buckets. Results are sliced by language and fix size. |
 | **Every dataset has its own format.** | Glue code everywhere. | Reads and writes SWE-bench, Pro, generic and specs-dict rows. Predictions are compatible with the official harness. SWE-agent trajectories import directly. |
 
 **Where it stops.** This is the task-factory and verifier layer.
-- **Scale-out:** running thousands of sandboxes in parallel (Kubernetes, Modal) plugs in behind the `Sandbox` interface; it isn't included here.
+- **Scale-out:** cluster execution (Kubernetes, Modal), warm container pools and pre-baked agent images are not included. The sandbox layer would need a backend registry to plug them in.
 - **Review:** the static checks are heuristics designed to be reviewed by a person.
 
 ## Who is this for
@@ -178,7 +178,7 @@ Exit codes:
 
 ## Results
 
-### 1. The tool reproduces the papers' own measurements
+### 1. The tool reproduces the papers' own measurements (dataset statistics)
 
 From `sweforge stats` on the public datasets as published on HuggingFace (Verified: 500 tasks; Pro public split: 642 tasks):
 
@@ -225,7 +225,7 @@ How to read the comparison: Lite tasks edit a single file, so "all", "any" and "
 
 Every check below used the benchmarks' **own** images and data. The full log, with the bugs these checks uncovered and how they were fixed, is in [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
-- **Grading parity on every SWE-bench repository type.** One task from each of the 12 Lite repositories, covering astropy, django, matplotlib, seaborn, flask, requests, xarray, pylint, pytest, scikit-learn, sphinx and sympy. This exercises all seven SWE-bench log parsers, plus `tox` and sympy's `bin/test`. The reference patch resolves and the empty patch does not, on all of them. The one exception is `requests`, whose upstream test list depends on a live website.
+- **Grading parity across SWE-bench repository types (n = 1 task per repository, reference and empty patch).** One task from each of the 12 Lite repositories, covering astropy, django, matplotlib, seaborn, flask, requests, xarray, pylint, pytest, scikit-learn, sphinx and sympy. This exercises all seven SWE-bench log parsers, plus `tox` and sympy's `bin/test`. The reference patch resolves and the empty patch does not, on all of them. The one exception is `requests`, whose upstream test list depends on a live website.
 - **Test lists re-derived by `validate`:**
 
   | Task | Ours vs the dataset |
@@ -470,29 +470,35 @@ Every grade also carries `flags`, `failure` and `reverted_test_files`, so reward
   See [docs/DESIGN.md](docs/DESIGN.md).
 - **The agent can't see the answer.**
   - Only `problem_statement`, `requirements` and `interface` are visible.
-  - Agents have no network by default.
+  - Agents have no network by default. Validation and grading are offline too (`env.test_network`), except where the official harness installs packages at test time.
   - The git history is purged after the base commit, and `env.hidden_paths` are deleted.
-- **Graders can't easily be gamed.** Grading always runs in a fresh sandbox:
+- **Graders are hardened against known reward hacks.** Grading always runs in a fresh sandbox:
   - The candidate patch is applied with three fallbacks: `git apply`, `--reject`, `patch --fuzz`.
   - Test files, test-dir helpers (unless the reference fix edits them) and runner config are reverted.
   - Paths the hidden tests need are cleared.
   - Hidden tests are applied last.
-  - Each run uses random markers, and Pro parsers run outside the sandbox.
-  - Real environment problems are `harness_error`, never agent failures.
+  - Each test must reach the status it had in validation, so an `XFAIL` doesn't count as a pass.
+  - A test reported with conflicting statuses (a forged `PASSED` line) counts as failed.
+  - For pytest and sympy runners, a randomly named test that must fail is added; if it passes, the framework was tampered with.
+  - Each run uses fresh random output markers, and Pro's parser runs outside the sandbox.
+  - Infrastructure failures before the agent starts are `harness_error`. An agent that breaks its own environment scores 0 and stays counted.
+  - Every result records the image ID and digest, platform and tool version.
 - **Test names match the official harnesses.**
   - The Python parsers reproduce SWE-bench's naming rules (pytest, pytest-options, pytest-v2, django, sympy, matplotlib, seaborn).
   - Pro tasks use Pro's own scripts.
   - Other parsers cover Go, Jest/Vitest, Mocha, Cargo, JUnit, TRX, .NET, TAP, RSpec, Minitest and GoogleTest. `auto` picks the best.
 - **Parallel safe.** File-locked repo cache with atomic clones. Batches resume after interruption.
 
-## Limitations
+## Limitations and residual risks
 
-- **Grading trusts the test process.** Like SWE-bench, code under test that monkeypatches the test framework itself from a source module (for example `_pytest.reports`) is not detected.
-- **Environment building covers most repositories, not all.** CI detection plus the setup agent handle common Python, Node, Go, Rust and Java setups and their services. UI tests that need browsers, paid APIs, private registries and hardware-specific code still need a human. Those tasks are reported as `environment_incomplete`, never silently dropped.
-- **Static checks are heuristics.** The naming-leak, interface and definition checks are per-language regexes. Treat their output as drafts and warnings.
+- **Grading trusts the test process.** Code under test runs as the same user as the test runner. Known in-process tricks are caught: a pytest hook or patched report object (canary), forged result lines (conflicting statuses), `pytest.xfail` (exact statuses), and access to `_pytest` / `pluggy` (flag). A determined attacker with root inside the container could still, in principle, find the run directory or forge output in non-pytest runners. Running tests as an unprivileged user with read-only test files would close more of this. It isn't implemented.
+- **Pro scripts.** SWE-bench Pro's per-task `parser.py` runs on the host, outside the sandbox. Use it only with scripts from the official Pro repository.
+- **P2P covers the test files the test patch touches.** This is the same scope as SWE-bench. A regression elsewhere in the suite is not seen.
+- **Environment building covers most repositories, not all.** CI detection plus the setup agent handle common Python, Node, Go, Rust and Java setups and their services. UI tests that need browsers, paid APIs, private registries and hardware-specific code still need a human. Those tasks are reported as `environment_incomplete` or `environment_needs_network`, never silently dropped. Dockerfiles also rot over time; build once and keep the image (its digest is recorded).
+- **Static checks are heuristics.** The naming-leak, interface and definition checks are per-language regexes. The leak check works on token n-grams, so a paraphrased leak passes. Treat their output as drafts and warnings.
 - **Rust in-file tests can't be split out.** Unit tests inside Rust source files (`#[cfg(test)]`) stay in the gold patch when a commit is split.
-- **The LLM agent is a minimal reference agent.** Use your own agent for leaderboard numbers.
-- **Some upstream lists aren't reproducible.** A few upstream FAIL_TO_PASS lists depend on live network services (see Results §4). `validate` reports what is reproducible today.
+- **The LLM agent is a minimal reference agent.** The LLM features (agent, spec writer, setup agent) are verified with scripted models in the tests. Live runs with a small local model showed format brittleness, which has since been hardened, but they were not repeated at scale. Use your own agent for leaderboard numbers.
+- **Evidence is small-sample.** It is one task per SWE-bench repository, 4 re-derived test lists, one public mined repository, and a handful of real-agent patches (see [docs/VERIFICATION.md](docs/VERIFICATION.md)). Agreement with the official harness on hundreds of real predictions has not been measured.
 
 ## Development
 

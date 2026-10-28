@@ -31,7 +31,7 @@ It reads and writes SWE-bench and SWE-bench Pro data, so it works with datasets 
    The harness never hard-codes a repo.
 3. **Pluggable sandboxes.** The same code runs inside Docker (the real thing) or in a local temp checkout (fast, used by CI and the demo).
 4. **The agent never sees the answer.** Agents only get `problem_statement`, `requirements` and `interface`, plus a repo at `base_commit` whose future git history has been stripped. Tests are applied only at grading time, in a fresh sandbox.
-5. **Graders can't be tampered with.** Before the hidden tests are applied, the grader reverts any agent change to a file the hidden tests touch. Edits to test files and added skip markers are flagged.
+5. **Graders are hardened against tampering.** Before the hidden tests are applied, the grader reverts agent changes to test files, test helpers and test-runner config. Statuses must match validation, conflicting statuses fail, a must-fail canary detects framework tampering, and suspicious edits (skip markers, test settings, test-framework access) fail strict grading. Known residual risks are listed in the README.
 6. **Binary and dense rewards from one run.**
    - `resolved` is the papers' metric: every F2P and P2P test passes.
    - `dense` is LHTB-style partial credit: the fraction of F2P tests passing, multiplied by the fraction of P2P tests still passing.
