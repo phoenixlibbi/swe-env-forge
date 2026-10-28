@@ -45,6 +45,8 @@ def from_pro(row: dict[str, Any], scripts: dict[str, str] | None = None) -> Task
         if isinstance(meta.get(k), str):
             meta[k] = _as_list(meta[k])
     scripts = scripts or {}
+    if scripts.get("pro_scripts_version"):
+        meta["pro_scripts_version"] = scripts["pro_scripts_version"]
     return Task(
         instance_id=row["instance_id"], repo=row["repo"], base_commit=row["base_commit"],
         problem_statement=row.get("problem_statement", ""), requirements=row.get("requirements", "") or "",

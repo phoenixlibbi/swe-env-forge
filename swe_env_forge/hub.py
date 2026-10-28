@@ -107,16 +107,30 @@ def iter_hf_rows(dataset: str, split: str = "test", config: str = "default", *, 
 
 
 # ----------------------------------------------------------------- SWE-bench Pro
-def fetch_pro_scripts(instance_id: str, ref: str = "main") -> dict[str, str]:
-    """``run_script.sh`` and ``parser.py`` for one SWE-bench Pro instance (cached)."""
+def fetch_pro_scripts(instance_id: str, ref: str = "main", version: str = "auto") -> dict[str, str]:
+    """``run_script.sh`` and ``parser.py`` for one SWE-bench Pro instance (cached).
+
+    Pro V2 (the HuggingFace ``default`` config) ships per-task scripts under
+    ``v2/tasks/<id>/tests/``; the original release kept them under ``run_scripts/<id>/``. The two
+    differ (for example V2's NodeBB parser joins describe blocks with " | "), and the dataset's
+    FAIL_TO_PASS names follow the version they came from. ``auto`` tries V2 first.
+    """
     from .presets import PRO_SCRIPTS_REPO
 
-    out = {}
-    for key, fname in (("run_script", "run_script.sh"), ("parser_script", "parser.py")):
-        url = f"https://raw.githubusercontent.com/{PRO_SCRIPTS_REPO}/{ref}/run_scripts/{instance_id}/{fname}"
-        body, _ = http_get(url, cache=True)
-        out[key] = body.decode("utf-8")
-    return out
+    layouts = {"v2": "v2/tasks/{iid}/tests/{f}", "v1": "run_scripts/{iid}/{f}"}
+    order = ["v2", "v1"] if version == "auto" else [version]
+    last: Exception | None = None
+    for v in order:
+        out = {"pro_scripts_version": v}
+        try:
+            for key, fname in (("run_script", "run_script.sh"), ("parser_script", "parser.py")):
+                url = f"https://raw.githubusercontent.com/{PRO_SCRIPTS_REPO}/{ref}/" + layouts[v].format(iid=instance_id, f=fname)
+                body, _ = http_get(url, cache=True, retries=1)
+                out[key] = body.decode("utf-8")
+            return out
+        except HTTPError as exc:
+            last = exc
+    raise last or HTTPError(instance_id, 404, "no Pro scripts found")
 
 
 # ----------------------------------------------------------------------- GitHub
