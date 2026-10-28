@@ -57,10 +57,13 @@ def truncate(text: str, limit: int) -> str:
 
 class SWEEnv:
     def __init__(self, task: Task, backend: str = "docker", budget: Budget | None = None, *,
-                 network: bool = False, checkpoint_every: int = 0, include_hints: bool = False, keep: bool = False):
+                 network: bool = False, checkpoint_every: int = 0, include_hints: bool = False, keep: bool = False,
+                 grade_on_done: bool = False, strict: bool = True):
         self.task, self.backend, self.budget = task, backend, budget or Budget()
         self.network, self.checkpoint_every = network, checkpoint_every
         self.include_hints, self.keep = include_hints, keep
+        self.grade_on_done, self.strict = grade_on_done, strict
+        self.result = None   # GradeResult once graded
         self.sb: Sandbox | None = None
         self.turn, self.cost, self.started = 0, 0.0, 0.0
         self.done, self.exit_reason = False, ""
@@ -118,7 +121,7 @@ class SWEEnv:
         self.cost += float(action.get("cost") or 0.0)
         if kind == "submit":
             self._finish("submitted")
-            return "submitted", True, {"exit_reason": self.exit_reason}
+            return "submitted", True, self._final_info()
         self.turn += 1
         step = Step(turn=self.turn, action={k: v for k, v in action.items() if k not in ("cost", "thought")},
                     cost=float(action.get("cost") or 0.0), thought=str(action.get("thought") or ""))
@@ -142,7 +145,16 @@ class SWEEnv:
         reason = self._over_budget()
         if reason:
             self._finish(reason)
+            return step.output, True, self._final_info()
         return step.output, self.done, {"exit_reason": self.exit_reason, "turn": self.turn, "cost": self.cost}
+
+    def _final_info(self) -> dict[str, Any]:
+        """At the end of an episode: exit reason and, with ``grade_on_done``, the reward."""
+        info: dict[str, Any] = {"exit_reason": self.exit_reason, "turn": self.turn, "cost": self.cost}
+        if self.grade_on_done:
+            self.result = grade(self.task, self.final_patch, self.backend, strict=self.strict)
+            info.update(reward=self.result.dense, resolved=self.result.resolved, grade=self.result.to_dict())
+        return info
 
     def _over_budget(self) -> str:
         b = self.budget
@@ -187,6 +199,8 @@ def run_episode(task: Task, agent, backend: str = "docker", budget: Budget | Non
                 break
             last, _done, _info = env.step(action)
         ep.exit_reason, ep.turns, ep.cost = env.exit_reason, env.turn, round(env.cost, 6)
+        if isinstance(getattr(agent, "messages", None), list):
+            ep.messages = list(agent.messages)   # exactly what the policy saw, for training
         ep.patch, ep.steps, ep.checkpoints = env.final_patch, env.steps, env.checkpoints
     except Exception as exc:
         ep.error = f"{type(exc).__name__}: {exc}"

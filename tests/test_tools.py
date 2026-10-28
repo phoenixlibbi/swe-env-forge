@@ -129,3 +129,19 @@ def test_env_reports_tool_errors_without_crashing(fix_task):
         assert "unknown editor command" in out and not done
         out, _, _ = env.step({"type": "invalid_tool_arguments"})
         assert "unknown action type" in out
+
+
+def test_reward_in_info_and_messages_saved(fix_task, tmp_path):
+    from swe_env_forge.trajectory import Episode
+
+    with SWEEnv(fix_task, "local", grade_on_done=True) as env:
+        env.reset()
+        env.step({"type": "editor", "command": "str_replace", "path": "minishop/pricing.py",
+                  "old_str": "return cents - cents * percent // 100",
+                  "new_str": "return cents - (cents * percent + 50) // 100"})
+        _out, done, info = env.step({"type": "submit"})
+    assert done and info["resolved"] is True and info["reward"] == 1.0 and info["grade"]["dense"] == 1.0
+    client = ToolClient([{"role": "assistant", "content": "done", "tool_calls": [call(1, "submit")]}])
+    ep = run_episode(fix_task, LLMAgent(fix_task, client), "local", out_dir=tmp_path)
+    assert ep.messages[0]["role"] == "system" and ep.messages[-1]["tool_calls"][0]["id"] == "call_1"
+    assert Episode.load(tmp_path / fix_task.instance_id).messages == ep.messages

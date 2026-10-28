@@ -44,6 +44,7 @@ class Episode:
     grade: dict[str, Any] | None = None
     error: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    messages: list[dict[str, Any]] = field(default_factory=list)   # the model's view (LLM agents)
 
     @property
     def tool_error_rate(self) -> float:
@@ -54,6 +55,7 @@ class Episode:
         """Everything except the step-by-step log (kept in the trajectory file)."""
         d = asdict(self)
         d.pop("steps")
+        d.pop("messages")
         d["tool_error_rate"] = round(self.tool_error_rate, 4)
         d["n_steps"] = len(self.steps)
         return d
@@ -78,6 +80,8 @@ class Episode:
                 fh.write(json.dumps(asdict(s), ensure_ascii=False) + "\n")
         (out / "episode.json").write_text(json.dumps(self.summary(), indent=2, ensure_ascii=False), encoding="utf-8")
         (out / "patch.diff").write_text(self.patch, encoding="utf-8")
+        if self.messages:
+            (out / "messages.json").write_text(json.dumps(self.messages, indent=1, ensure_ascii=False), encoding="utf-8")
         return out
 
     @classmethod
@@ -89,6 +93,8 @@ class Episode:
             data.pop(k, None)
         data["checkpoints"] = [Checkpoint(**c) for c in data.get("checkpoints", [])]
         ep = cls(**data)
+        if (path / "messages.json").exists():
+            ep.messages = json.loads((path / "messages.json").read_text(encoding="utf-8"))
         traj = path / "trajectory.jsonl"
         if traj.exists():
             ep.steps = [Step(**json.loads(ln)) for ln in traj.read_text(encoding="utf-8").splitlines() if ln.strip()]
