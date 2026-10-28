@@ -63,6 +63,16 @@ class Sandbox(ABC):
 
 
 # ----------------------------------------------------------------------- docker
+def cleanup_containers() -> list[str]:
+    """Remove every container this tool started (label ``sweforge=1``); returns their names."""
+    res = subprocess.run(["docker", "ps", "-a", "--filter", "label=sweforge=1", "--format", "{{.Names}}"],
+                         capture_output=True, text=True)
+    names = [n for n in res.stdout.split() if n]
+    if names:
+        subprocess.run(["docker", "rm", "-f", *names], capture_output=True, timeout=600)
+    return names
+
+
 def docker_available() -> bool:
     if not shutil.which("docker"):
         return False
@@ -121,7 +131,7 @@ class DockerSandbox(Sandbox):
     def __init__(self, image: str, workdir: str = "/testbed", *, platform: str | None = None,
                  network: bool = True, env_vars: dict[str, str] | None = None, memory: str | None = None,
                  cpus: str | None = None, keep: bool = False, pull: bool = True,
-                 services: list[dict] | None = None, service_timeout: float = 180):
+                 services: list[dict] | None = None, service_timeout: float = 180, pids_limit: int = 4096):
         self.image, self.workdir, self.keep = image, workdir, keep
         self.scratch = "/tmp/sweforge"
         self.env_vars = dict(env_vars or {})
@@ -129,6 +139,7 @@ class DockerSandbox(Sandbox):
         if pull:
             docker_pull(image, platform)
         cmd = ["docker", "run", "-d", "--name", self.name, "--entrypoint", "tail",
+               "--label", "sweforge=1", "--pids-limit", str(pids_limit),
                *(["--platform", platform] if platform else []),
                *([] if network else ["--network", "none"]),
                *(["--memory", memory] if memory else []), *(["--cpus", cpus] if cpus else []),
@@ -162,7 +173,7 @@ class DockerSandbox(Sandbox):
         name = f"{self.name}-{re.sub(r'[^a-z0-9-]', '-', str(svc.get('name', 'svc')).lower())}"
         env = dict(next((v for k, v in SERVICE_DEFAULT_ENV.items() if k in image.split("/")[-1]), {}))
         env.update({str(k): str(v) for k, v in (svc.get("env") or {}).items()})
-        cmd = ["docker", "run", "-d", "--name", name, "--network", f"container:{self.name}",
+        cmd = ["docker", "run", "-d", "--name", name, "--network", f"container:{self.name}", "--label", "sweforge=1",
                *[a for k, v in env.items() for a in ("-e", f"{k}={v}")], image,
                *(shlex.split(svc["command"]) if svc.get("command") else [])]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)

@@ -14,7 +14,8 @@ from .logparsers import is_pass
 from .patches import parse_patch
 from .sandbox import Sandbox
 from .task import Task
-from .workspace import apply_patch, checkout_base, open_sandbox, revert_files, run_tests, start_ref
+from .workspace import (apply_patch, checkout_base, environment_fingerprint, open_sandbox, revert_files,
+                        run_tests, start_ref)
 
 _q = shlex.quote
 
@@ -216,6 +217,7 @@ def grade_in(sb: Sandbox, task: Task, patch: str, *, strict: bool = True, timeou
 
     canary = _inject_canary(sb, task)
     run = run_tests(sb, task, timeout=timeout, label="grade")
+    r.metadata["environment"] = environment_fingerprint(sb, task)
     r.duration = round(run.duration, 2)
     r.test_log_tail = run.log[-6000:]
     if run.timed_out:

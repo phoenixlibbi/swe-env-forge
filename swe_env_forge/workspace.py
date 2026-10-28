@@ -89,24 +89,56 @@ def repo_cache(url: str, commit: str | None = None) -> Path:
 
 
 # ------------------------------------------------------------------ sandboxes
+def _dockerfile_text(task: Task) -> str:
+    if task.env.dockerfile:
+        return task.env.dockerfile
+    from .dockerfiles import generate_dockerfile
+
+    try:
+        return generate_dockerfile(task)
+    except ValueError:
+        return ""
+
+
 def image_tag(task: Task) -> str:
+    """``sweforge/<task>:<hash of the Dockerfile>``: a changed Dockerfile never reuses a stale image."""
     slug = re.sub(r"[^a-z0-9_.-]+", "-", task.instance_id.lower()).strip("-.")[:100]
-    return f"sweforge/{slug}:latest"
+    text = _dockerfile_text(task)
+    digest = hashlib.sha256(f"{text}\n{task.base_commit}".encode()).hexdigest()[:12] if text else "latest"
+    return f"sweforge/{slug}:{digest}"
 
 
 def ensure_image(task: Task, rebuild: bool = False) -> str:
-    """Docker image for ``task``: its prebuilt image, or one built from its Dockerfile."""
+    """Docker image for ``task``: its prebuilt image, or one built from its Dockerfile (once, under a lock)."""
     if task.env.image:
         return task.env.image
     tag = image_tag(task)
-    if rebuild or not docker_image_exists(tag):
-        if task.env.dockerfile:
-            docker_build(task.env.dockerfile, tag, task.env.platform)
-        else:
-            from .dockerfiles import build_default_image
+    with _locked(cache_dir() / "locks" / re.sub(r"[^A-Za-z0-9_.-]", "_", tag)):
+        if rebuild or not docker_image_exists(tag):
+            if task.env.dockerfile:
+                docker_build(task.env.dockerfile, tag, task.env.platform)
+            else:
+                from .dockerfiles import build_default_image
 
-            build_default_image(task, tag)
+                build_default_image(task, tag)
     return tag
+
+
+def environment_fingerprint(sb: Sandbox, task: Task) -> dict:
+    """What produced a result: image id and digest, platform, tool version, start commit."""
+    from . import __version__
+
+    fp = {"sweforge_version": __version__, "start_ref": start_ref(sb, task), "backend": type(sb).__name__}
+    image = getattr(sb, "image", None)
+    if image:
+        res = subprocess.run(["docker", "image", "inspect", "--format",
+                              "{{.Id}}|{{join .RepoDigests \",\"}}|{{.Os}}/{{.Architecture}}", image],
+                             capture_output=True, text=True)
+        if res.returncode == 0:
+            image_id, digests, platform = (res.stdout.strip().split("|") + ["", "", ""])[:3]
+            fp.update({"image": image, "image_id": image_id, "image_digests": [d for d in digests.split(",") if d],
+                       "platform": platform})
+    return fp
 
 
 def open_sandbox(task: Task, backend: str = "docker", *, network: bool | None = None, keep: bool = False,

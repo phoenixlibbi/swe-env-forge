@@ -469,6 +469,14 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_cleanup(args) -> int:
+    from .sandbox import cleanup_containers
+
+    names = cleanup_containers()
+    log(f"removed {len(names)} sweforge container(s)" + (f": {', '.join(names)}" if names else ""))
+    return 0
+
+
 def cmd_localize(args) -> int:
     from .localize import localize_task, summarize
     from .task import write_jsonl
@@ -666,6 +674,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json")
     _add_selection(p)
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("cleanup", help="remove containers left behind by interrupted runs (only this tool's)")
+    p.set_defaults(fn=cmd_cleanup)
 
     p = sub.add_parser("localize", help="BM25 vs oracle file retrieval (SWE-bench Table 3)")
     p.add_argument("tasks")

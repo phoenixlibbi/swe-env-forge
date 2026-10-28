@@ -165,3 +165,23 @@ def test_changed_test_functions_maps_hunks_to_enclosing_tests():
     assert got == {"tests/test_s.py": {"test_iter"}}   # the import line has no enclosing test
     assert _test_name_matches("tests/test_s.py::TestS::test_iter[a-b]", got["tests/test_s.py"])
     assert not _test_name_matches("tests/test_s.py::TestS::test_other", got["tests/test_s.py"])
+
+
+def test_results_carry_an_environment_fingerprint(demo_tasks):
+    from swe_env_forge import __version__
+
+    t, res = validated(demo_tasks["fix"])
+    assert res.environment["sweforge_version"] == __version__ and res.environment["start_ref"] == t.base_commit
+    assert t.metadata["validation"]["environment"]["backend"] == "LocalSandbox"
+    g = grade(t, t.gold_patch, backend="local")
+    assert g.metadata["environment"]["sweforge_version"] == __version__
+
+
+def test_image_tags_follow_the_dockerfile():
+    from swe_env_forge.task import Task
+    from swe_env_forge.workspace import image_tag
+
+    a = Task.from_dict({"instance_id": "O__R-1", "repo": "o/r", "base_commit": "b", "env": {"dockerfile": "FROM a\n"}})
+    b = Task.from_dict({"instance_id": "O__R-1", "repo": "o/r", "base_commit": "b", "env": {"dockerfile": "FROM b\n"}})
+    assert image_tag(a).startswith("sweforge/o__r-1:") and image_tag(a) != image_tag(b)
+    assert image_tag(a) == image_tag(Task.from_dict(a.to_dict()))
