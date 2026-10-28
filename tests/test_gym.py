@@ -166,3 +166,11 @@ def test_agent_that_breaks_git_scores_zero_and_stays_counted(fix_task):
     rep = build_report([ep])
     assert rep["n"] == 1 and rep["slices"]["overall"]["all"]["resolved_pct"] == 0.0
     assert rep["failure_modes"]["not_submitted"]["buckets"]["broke_environment"]["count"] == 1
+
+
+def test_samples_per_task_for_pass_at_k(fix_task, tmp_path):
+    eps = run_batch([fix_task], lambda t: OracleAgent(t), "local", out_dir=tmp_path, samples=2)
+    assert len(eps) == 2 and sorted(e.metadata["sample"] for e in eps) == [1, 2]
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_dir()) == [f"{fix_task.instance_id}@1", f"{fix_task.instance_id}@2"]
+    assert len((tmp_path / "predictions.jsonl").read_text().splitlines()) == 1
+    assert run_batch([fix_task], lambda t: OracleAgent(t), "local", out_dir=tmp_path, samples=2) == []   # resumes

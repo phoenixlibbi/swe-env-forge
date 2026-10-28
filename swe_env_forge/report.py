@@ -7,6 +7,8 @@ an agent would have had under any turn or cost cap.
 
 from __future__ import annotations
 
+import math
+import random
 import statistics
 from collections import defaultdict
 from typing import Any, Iterable
@@ -29,33 +31,105 @@ def _bucket(value: int, buckets) -> str:
     return "0"
 
 
-def solved_at(ep: Episode) -> tuple[int, float] | None:
-    """(turn, cumulative cost) when the episode first had a resolving patch, or None.
-
-    Uses graded checkpoints when present; otherwise the final submission.
-    """
-    cum, costs = 0.0, {}
+def _cum_costs(ep: Episode) -> dict[int, float]:
+    cum, costs = 0.0, {0: 0.0}
     for s in ep.steps:
         cum += s.cost
         costs[s.turn] = cum
-    for cp in sorted(ep.checkpoints, key=lambda c: c.turn):
-        if cp.grade and cp.grade.get("resolved"):
-            return cp.turn, costs.get(cp.turn, cum)
-    if ep.grade and ep.grade.get("resolved"):
-        return ep.turns, ep.cost or cum
-    return None
+    return costs
+
+
+def resolved_if_stopped(ep: Episode, turn_cap: float = float("inf"), cost_cap: float = float("inf")) -> bool:
+    """Would the episode count as resolved had it been stopped at the cap?
+
+    A stopped run submits its latest patch, so this is the grade of the last checkpoint within the cap
+    (the final grade when the whole run fits). An early resolving patch that was later broken does not
+    count for caps after it was broken, and never for the uncapped score.
+    """
+    costs = _cum_costs(ep)
+    final_cost = ep.cost or max(costs.values())
+    if ep.turns <= turn_cap and final_cost <= cost_cap:
+        return bool(ep.grade and ep.grade.get("resolved"))
+    within = [cp for cp in ep.checkpoints if cp.turn <= turn_cap and costs.get(cp.turn, final_cost) <= cost_cap]
+    if not within:
+        return False
+    last = max(within, key=lambda c: c.turn)
+    return bool(last.grade and last.grade.get("resolved"))
+
+
+def solved_at(ep: Episode) -> tuple[int, float] | None:
+    """(turn, cumulative cost) from which the episode stays resolved to the end, or None."""
+    if not (ep.grade and ep.grade.get("resolved")):
+        return None
+    costs = _cum_costs(ep)
+    turn = ep.turns
+    for cp in sorted(ep.checkpoints, key=lambda c: c.turn, reverse=True):
+        if not (cp.grade and cp.grade.get("resolved")):
+            break
+        turn = cp.turn
+    return turn, costs.get(turn, ep.cost)
 
 
 def budget_curves(episodes: list[Episode], turn_caps: Iterable[int] = DEFAULT_TURN_CAPS,
                   cost_caps: Iterable[float] = DEFAULT_COST_CAPS) -> dict[str, Any]:
     n = len(episodes)
-    solved = [solved_at(e) for e in episodes]
     pct = lambda k: round(100.0 * k / n, 1) if n else 0.0  # noqa: E731
     return {
-        "by_turns": {str(t): pct(sum(1 for s in solved if s and s[0] <= t)) for t in turn_caps},
-        "by_cost": {f"{c:g}": pct(sum(1 for s in solved if s and s[1] <= c)) for c in cost_caps},
-        "uncapped": pct(sum(1 for s in solved if s)),
+        "by_turns": {str(t): pct(sum(resolved_if_stopped(e, turn_cap=t) for e in episodes)) for t in turn_caps},
+        "by_cost": {f"{c:g}": pct(sum(resolved_if_stopped(e, cost_cap=c) for e in episodes)) for c in cost_caps},
+        "uncapped": pct(sum(bool(e.grade and e.grade.get("resolved")) for e in episodes)),
     }
+
+
+# ----------------------------------------------------------------- statistics
+def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a proportion, in percent."""
+    if n == 0:
+        return 0.0, 0.0
+    p = successes / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return round(100 * max(0.0, centre - half), 1), round(100 * min(1.0, centre + half), 1)
+
+
+def pass_at_k(n: int, c: int, k: int) -> float:
+    """Unbiased pass@k from n samples with c correct (Chen et al., 2021)."""
+    if n - c < k:
+        return 1.0
+    return 1.0 - math.prod((n - c - i) / (n - i) for i in range(k))
+
+
+def repo_bootstrap(results: list[dict[str, Any]], tasks: dict[str, Task], iters: int = 1000,
+                   seed: int = 0) -> tuple[float, float] | None:
+    """95% interval of the resolve rate, resampling whole repositories (deterministic seed)."""
+    by_repo: dict[str, list[bool]] = defaultdict(list)
+    for r in results:
+        t = tasks.get(r["instance_id"])
+        by_repo[t.repo if t else "?"].append(bool(r.get("resolved")))
+    repos = list(by_repo.values())
+    if len(repos) < 2:
+        return None
+    rng = random.Random(seed)
+    rates = []
+    for _ in range(iters):
+        pick = [rng.choice(repos) for _ in repos]
+        total = sum(len(p) for p in pick)
+        rates.append(100.0 * sum(sum(p) for p in pick) / total if total else 0.0)
+    rates.sort()
+    return round(rates[int(0.025 * iters)], 1), round(rates[int(0.975 * iters) - 1], 1)
+
+
+def pass_at_k_table(episodes: list[Episode], ks: Iterable[int] = (1, 2, 5, 10)) -> dict[str, float] | None:
+    by_task: dict[str, list[bool]] = defaultdict(list)
+    for e in episodes:
+        if e.grade:
+            by_task[e.instance_id].append(bool(e.grade.get("resolved")))
+    if not by_task or max(len(v) for v in by_task.values()) < 2:
+        return None
+    n_min = min(len(v) for v in by_task.values())
+    return {f"pass@{k}": round(100 * statistics.fmean(pass_at_k(len(v), sum(v), k) for v in by_task.values()), 1)
+            for k in ks if k <= n_min}
 
 
 def _row(items: list[tuple[bool, float]]) -> dict[str, Any]:
@@ -96,6 +170,11 @@ def build_report(episodes: list[Episode] | None = None, grades: list[dict[str, A
     results = ([{"instance_id": e.instance_id, **e.grade} for e in graded_eps] if episodes
                else list(grades or []))
     rep: dict[str, Any] = {"name": name, "n": len(results), "slices": slices(results, task_map)}
+    solved = sum(bool(r.get("resolved")) for r in results)
+    rep["resolved_ci95"] = wilson(solved, len(results))
+    boot = repo_bootstrap(results, task_map) if task_map else None
+    if boot:
+        rep["resolved_ci95_repo_bootstrap"] = boot
     if episodes:
         # ungraded episodes (e.g. imported without --grade) count for behaviour, never as failures
         rep["episodes"], rep["ungraded"] = len(episodes), len(episodes) - len(graded_eps)
@@ -108,6 +187,9 @@ def build_report(episodes: list[Episode] | None = None, grades: list[dict[str, A
         rep["mean_cost"] = round(statistics.fmean(e.cost for e in episodes), 4)
         rep["total_cost"] = round(sum(e.cost for e in episodes), 4)
         rep["budget_curves"] = budget_curves(graded_eps)
+        pk = pass_at_k_table(graded_eps)
+        if pk:
+            rep["pass_at_k"] = pk
         rep["failure_modes"] = distribution(graded_eps, task_map)
     flags = defaultdict(int)
     for r in results:
@@ -131,6 +213,7 @@ def to_markdown(reports: list[dict[str, Any]]) -> str:
     head = ["metric", *names]
     rows = [["graded episodes", *[r["n"] for r in reports]],
             ["resolved %", *[r["slices"].get("overall", {}).get("all", {}).get("resolved_pct", "n/a") for r in reports]],
+            ["95% CI (Wilson)", *[f"{r['resolved_ci95'][0]}–{r['resolved_ci95'][1]}" if r["n"] else "n/a" for r in reports]],
             ["mean dense reward", *[r["slices"].get("overall", {}).get("all", {}).get("mean_dense", "n/a") for r in reports]]]
     if all("budget_curves" in r for r in reports):
         rows += [["ungraded episodes", *[r.get("ungraded", 0) for r in reports]],
@@ -165,6 +248,10 @@ def to_markdown(reports: list[dict[str, Any]]) -> str:
                 for k, v in fm[side]["buckets"].items():
                     out.append(f"- {side.replace('_', ' ')} / {k}: {v['count']} ({v['pct']}%)")
             out.append("")
+    if any(r.get("pass_at_k") for r in reports):
+        ks = sorted({k for r in reports for k in (r.get("pass_at_k") or {})}, key=lambda k: int(k.split("@")[1]))
+        out += ["## pass@k (several samples per task)", "",
+                _table(["k", *names], [[k, *[(r.get("pass_at_k") or {}).get(k, "-") for r in reports]] for k in ks]), ""]
     if any(r["flags"] for r in reports):
         out += ["## Grader flags", ""]
         for name, r in zip(names, reports):

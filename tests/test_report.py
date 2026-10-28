@@ -127,3 +127,36 @@ def test_repeated_attempts_are_kept(tmp_path):
 
     eps = load_episodes(tmp_path)
     assert len(eps) == 2 and eps[1].metadata["attempt"] == 2
+
+
+def test_budget_caps_use_the_patch_a_stopped_run_would_submit():
+    from swe_env_forge.report import resolved_if_stopped
+
+    e = ep(grade={"resolved": False}, steps=bash_steps(["a", "b", "c", "d"], cost=0.5))
+    e.checkpoints = [Checkpoint(2, "", {"resolved": True}), Checkpoint(4, "", {"resolved": False})]
+    assert resolved_if_stopped(e, turn_cap=2) and resolved_if_stopped(e, turn_cap=3)
+    assert not resolved_if_stopped(e, turn_cap=4) and not resolved_if_stopped(e)
+    bc = budget_curves([e], turn_caps=(2, 10), cost_caps=(1.0,))
+    assert bc == {"by_turns": {"2": 100.0, "10": 0.0}, "by_cost": {"1": 100.0}, "uncapped": 0.0}
+
+
+def test_statistics_helpers():
+    from swe_env_forge.report import pass_at_k, repo_bootstrap, wilson
+
+    assert wilson(5, 10) == (23.7, 76.3) and wilson(0, 0) == (0.0, 0.0)
+    assert abs(pass_at_k(5, 1, 1) - 0.2) < 1e-9 and pass_at_k(5, 1, 5) == 1.0 and pass_at_k(5, 0, 3) == 0.0
+    tasks = {f"t{i}": Task(instance_id=f"t{i}", repo=f"r{i % 3}", base_commit="b") for i in range(9)}
+    results = [{"instance_id": f"t{i}", "resolved": i % 2 == 0} for i in range(9)]
+    lo, hi = repo_bootstrap(results, tasks)
+    assert 0 <= lo <= 55.6 <= hi <= 100
+    assert repo_bootstrap(results, tasks) == (lo, hi)            # deterministic
+
+
+def test_report_includes_ci_and_pass_at_k():
+    a1, a2 = ep("a", grade={"resolved": True, "dense": 1.0}), ep("a", grade={"resolved": False, "dense": 0.0})
+    b1, b2 = ep("b", grade={"resolved": False, "dense": 0.0}), ep("b", grade={"resolved": False, "dense": 0.0})
+    r = build_report([a1, a2, b1, b2], tasks=[task("a"), task("b")])
+    assert r["pass_at_k"] == {"pass@1": 25.0, "pass@2": 50.0}
+    assert r["resolved_ci95"][0] < 25.0 < r["resolved_ci95"][1]
+    md = to_markdown([r])
+    assert "95% CI (Wilson)" in md and "## pass@k" in md

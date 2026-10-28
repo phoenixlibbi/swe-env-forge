@@ -58,14 +58,14 @@ class Episode:
         d["n_steps"] = len(self.steps)
         return d
 
-    def save(self, out_dir: str | Path, unique: bool = False) -> Path:
+    def save(self, out_dir: str | Path, unique: bool = False, name: str | None = None) -> Path:
         """Write the episode to ``out_dir/<instance_id>``.
 
         With ``unique``, a second episode of the same task (another attempt, another turn of a
         multi-turn run) goes to ``<instance_id>@2``, ``@3``, ... instead of overwriting the first.
         """
-        out = Path(out_dir) / self.instance_id
-        if unique:
+        out = Path(out_dir) / (name or self.instance_id)
+        if unique and not name:
             k = 1
             while (out / "episode.json").exists():
                 k += 1

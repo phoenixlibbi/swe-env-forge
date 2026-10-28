@@ -219,28 +219,37 @@ def run_episode(task: Task, agent, backend: str = "docker", budget: Budget | Non
 
 def run_batch(tasks: list[Task], agent_factory: Callable[[Task], Any], backend: str = "docker", *,
               budget: Budget | None = None, out_dir: str | Path = "runs", workers: int = 1,
-              model_name: str = "agent", **kw) -> list[Episode]:
-    """Run many tasks (optionally in parallel). Writes per-task folders plus ``results.jsonl`` and
-    ``predictions.jsonl`` (SWE-bench format, usable with the official harness)."""
+              model_name: str = "agent", samples: int = 1, **kw) -> list[Episode]:
+    """Run many tasks (optionally in parallel), ``samples`` times each (for pass@k and group-based RL).
+
+    Writes one folder per episode (``<id>`` or ``<id>@<sample>``), ``results.jsonl`` and, for the
+    first sample, ``predictions.jsonl`` in SWE-bench format. Interrupted batches resume.
+    """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     done = {p.parent.name for p in out.glob("*/episode.json")}
-    todo = [t for t in tasks if t.instance_id not in done]
+    jobs = [(t, s) for t in tasks for s in range(1, max(1, samples) + 1)]
+    folder = (lambda t, s: t.instance_id if samples <= 1 else f"{t.instance_id}@{s}")  # noqa: E731
+    todo = [(t, s) for t, s in jobs if folder(t, s) not in done]
     results: list[Episode] = []
 
-    def one(t: Task) -> Episode:
+    def one(job: tuple[Task, int]) -> Episode:
+        t, s = job
         try:
             agent = agent_factory(t)
         except Exception as exc:  # e.g. a missing replay file: record it, keep the batch going
             ep = Episode(t.instance_id, "unknown", exit_reason="agent_error", error=f"{type(exc).__name__}: {exc}")
-            ep.save(out)
-            return ep
-        return run_episode(t, agent, backend, budget, out_dir=out, **kw)
+        else:
+            ep = run_episode(t, agent, backend, budget, **kw)
+        ep.metadata["sample"] = s
+        ep.save(out, name=folder(t, s))
+        return ep
 
     with cf.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for ep in pool.map(one, todo):
             results.append(ep)
             append_jsonl(out / "results.jsonl", ep.summary())
-            append_jsonl(out / "predictions.jsonl", {"instance_id": ep.instance_id,
-                                                     "model_name_or_path": model_name, "model_patch": ep.patch})
+            if ep.metadata.get("sample", 1) == 1:
+                append_jsonl(out / "predictions.jsonl", {"instance_id": ep.instance_id,
+                                                         "model_name_or_path": model_name, "model_patch": ep.patch})
     return results

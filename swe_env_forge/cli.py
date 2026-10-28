@@ -411,7 +411,7 @@ def cmd_run(args) -> int:
     budget = Budget(max_turns=args.max_turns, max_cost=args.max_cost, max_seconds=args.max_seconds,
                     command_timeout=args.command_timeout, max_output_chars=args.max_output_chars)
     eps = run_batch(tasks, factory, args.backend, budget=budget, out_dir=args.output, workers=args.workers,
-                    model_name=name, do_grade=not args.no_grade, grade_checkpoints=args.grade_checkpoints,
+                    model_name=name, samples=args.samples, do_grade=not args.no_grade, grade_checkpoints=args.grade_checkpoints,
                     checkpoint_every=args.checkpoint_every, network=args.network, strict=not args.lenient,
                     timeout=args.timeout)
     for ep in eps:
@@ -637,6 +637,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--backend", choices=["docker", "local"], default="docker")
     p.add_argument("--workers", type=int, default=1)
+    p.add_argument("--samples", type=int, default=1, help="episodes per task (pass@k, group-based RL)")
     p.add_argument("--max-turns", type=int, default=50)
     p.add_argument("--max-cost", type=float)
     p.add_argument("--max-seconds", type=float)
