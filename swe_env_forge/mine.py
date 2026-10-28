@@ -158,7 +158,9 @@ def mine_commits(source: str, repo: str | None = None, cfg: MineConfig | None = 
                 on_skip(sha, why)
             continue
         used.update(span)
-        messages = [_git(path, "log", "-1", "--format=%B", c).strip() for c in reversed(span)]
+        from .curate import strip_trailers   # Signed-off-by / Co-authored-by lines carry names and emails
+
+        messages = [strip_trailers(_git(path, "log", "-1", "--format=%B", c)) for c in reversed(span)]
         language = detect_language(files_in(gold) + files_in(tests))
         tasks.append(Task(
             instance_id=f"{_slug(repo)}-{sha[:12]}", repo=repo, base_commit=base,

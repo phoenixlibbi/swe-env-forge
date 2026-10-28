@@ -469,6 +469,44 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_dedup(args) -> int:
+    from .curate import find_duplicates
+    from .formats import load_any
+    from .task import save_tasks, write_jsonl
+
+    tasks = _load(args.tasks, args)
+    against = load_any(args.against) if args.against else []
+    dups = find_duplicates(tasks, args.threshold, against)
+    drop = {d.instance_id for d in dups}
+    for d in dups:
+        log(f"{d.instance_id}: {d.kind} duplicate of {d.duplicate_of} (similarity {d.similarity})")
+    if args.output:
+        save_tasks(args.output, [t for t in tasks if t.instance_id not in drop])
+    if args.report:
+        write_jsonl(args.report, (vars(d) for d in dups))
+    log(f"{len(dups)} duplicate(s) among {len(tasks)} tasks" + (f"; kept {len(tasks) - len(drop)} -> {args.output}" if args.output else ""))
+    return 0
+
+
+def cmd_scan(args) -> int:
+    from .curate import redact_task, scan_task
+    from .task import save_tasks, write_jsonl
+
+    tasks = _load(args.tasks, args)
+    findings = [f for t in tasks for f in scan_task(t)]
+    secret_ids = {f.instance_id for f in findings if f.severity == "secret"}
+    for f in findings:
+        log(f"{f.instance_id}: {f.severity} {f.kind} in {f.field}: {f.excerpt}")
+    if args.output:
+        kept = [redact_task(t) if args.redact else t for t in tasks if t.instance_id not in secret_ids or args.keep_secrets]
+        save_tasks(args.output, kept)
+        log(f"wrote {len(kept)} tasks to {args.output} ({len(tasks) - len(kept)} blocked for secrets)")
+    if args.report:
+        write_jsonl(args.report, (f.to_dict() for f in findings))
+    log(f"{len(findings)} finding(s): {len(secret_ids)} task(s) with secrets")
+    return 1 if secret_ids else 0
+
+
 def cmd_cleanup(args) -> int:
     from .sandbox import cleanup_containers
 
@@ -675,6 +713,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json")
     _add_selection(p)
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("dedup", help="find exact and near-duplicate tasks (optionally against another dataset)")
+    p.add_argument("tasks")
+    p.add_argument("-o", "--output", help="write the tasks without duplicates here")
+    p.add_argument("--against", help="another task file, e.g. public SWE-bench, to check for overlap")
+    p.add_argument("--threshold", type=float, default=0.8, help="Jaccard similarity of changed lines for near duplicates")
+    p.add_argument("--report")
+    _add_selection(p)
+    p.set_defaults(fn=cmd_dedup)
+
+    p = sub.add_parser("scan", help="find secrets and personal data in tasks; block or redact")
+    p.add_argument("tasks")
+    p.add_argument("-o", "--output", help="write tasks here (tasks with secrets are left out)")
+    p.add_argument("--redact", action="store_true", help="remove emails and sign-off trailers from agent-visible text")
+    p.add_argument("--keep-secrets", action="store_true", help="keep tasks with secrets in the output (not recommended)")
+    p.add_argument("--report")
+    _add_selection(p)
+    p.set_defaults(fn=cmd_scan)
 
     p = sub.add_parser("cleanup", help="remove containers left behind by interrupted runs (only this tool's)")
     p.set_defaults(fn=cmd_cleanup)
